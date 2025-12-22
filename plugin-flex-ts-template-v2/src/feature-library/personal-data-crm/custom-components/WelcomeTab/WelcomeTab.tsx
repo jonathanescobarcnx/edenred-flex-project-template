@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ITask } from '@twilio/flex-ui';
 import { Box } from '@twilio-paste/core/box';
 import { Heading } from '@twilio-paste/core/heading';
@@ -10,6 +10,7 @@ import { Stack } from '@twilio-paste/core/stack';
 import { HelpText } from '@twilio-paste/core/help-text';
 import { Flex } from '@twilio-paste/core/flex';
 import { Text } from '@twilio-paste/core/text';
+import { getFeatureFlags } from '../../../../utils/configuration';
 
 export interface Props {
   task: ITask;
@@ -17,22 +18,35 @@ export interface Props {
 
 export const WelcomeTab = ({ task }: Props) => {
   const [formData, setFormData] = useState({
-    nombreUsuario: 'Juan Pérez',
-    documento: '1234567890',
-    nit: '900123456',
-    clasificacionEmpresa: 'Mediana',
+    nombreUsuario: '',
+    documento: '',
+    nit: '',
+    clasificacionEmpresa: '',
     tipoSolicitante: '',
     tipoSolicitud: '',
   });
 
+  // Obtener configuración desde ui_attributes
+  const config = useMemo(() => {
+    const featureFlags = getFeatureFlags();
+    const personalDataCrmConfig = featureFlags?.features?.personal_data_crm || {};
+    
+    // Obtener las opciones desde la configuración JSON
+    const tipoSolicitanteOptions = personalDataCrmConfig.tipoSolicitanteOptions || [];
+    const tipoSolicitudOptions = personalDataCrmConfig.tipoSolicitudOptions || {};
+    
+    return {
+      tipoSolicitanteOptions,
+      tipoSolicitudOptions,
+    };
+  }, []);
+
   // Opciones para Tipo Solicitud basadas en Tipo Solicitante
-  const getTipoSolicitudOptions = (tipoSolicitante: string) => {
-    if (tipoSolicitante === 'Empresa') {
-      return ['Solicitud Empresa 1', 'Solicitud Empresa 2', 'Solicitud Empresa 3'];
-    } else if (tipoSolicitante === 'Persona') {
-      return ['Solicitud Persona 1', 'Solicitud Persona 2', 'Solicitud Persona 3'];
-    }
-    return [];
+  // Esta función obtiene las opciones desde la configuración JSON según el tipo de solicitante seleccionado
+  const getTipoSolicitudOptions = (tipoSolicitante: string): string[] => {
+    if (!tipoSolicitante) return [];
+    // Obtener las opciones desde config.tipoSolicitudOptions usando el tipo de solicitante como clave
+    return config.tipoSolicitudOptions[tipoSolicitante] || [];
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -225,8 +239,11 @@ export const WelcomeTab = ({ task }: Props) => {
                   <Option value="" disabled>
                     Selecciona una opción
                   </Option>
-                  <Option value="Empresa">Empresa</Option>
-                  <Option value="Persona">Persona</Option>
+                  {config.tipoSolicitanteOptions.map((option) => (
+                    <Option key={option} value={option}>
+                      {option}
+                    </Option>
+                  ))}
                 </Select>
               </Box>
 
