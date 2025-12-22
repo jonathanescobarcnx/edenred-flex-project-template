@@ -16,6 +16,11 @@ export interface Props {
   task: ITask;
 }
 
+interface PersonalDataCrmConfig {
+  tipoSolicitanteOptions: string[];
+  tipoSolicitudOptions: Record<string, string[]>;
+}
+
 export const WelcomeTab = ({ task }: Props) => {
   const [formData, setFormData] = useState({
     nombreUsuario: '',
@@ -27,13 +32,20 @@ export const WelcomeTab = ({ task }: Props) => {
   });
 
   // Obtener configuración desde ui_attributes
-  const config = useMemo(() => {
+  const config = useMemo((): PersonalDataCrmConfig => {
     const featureFlags = getFeatureFlags();
     const personalDataCrmConfig = featureFlags?.features?.personal_data_crm || {};
     
     // Obtener las opciones desde la configuración JSON
-    const tipoSolicitanteOptions = personalDataCrmConfig.tipoSolicitanteOptions || [];
-    const tipoSolicitudOptions = personalDataCrmConfig.tipoSolicitudOptions || {};
+    const tipoSolicitanteOptions: string[] = Array.isArray(personalDataCrmConfig.tipoSolicitanteOptions)
+      ? personalDataCrmConfig.tipoSolicitanteOptions
+      : [];
+    const tipoSolicitudOptions: Record<string, string[]> = 
+      typeof personalDataCrmConfig.tipoSolicitudOptions === 'object' && 
+      personalDataCrmConfig.tipoSolicitudOptions !== null &&
+      !Array.isArray(personalDataCrmConfig.tipoSolicitudOptions)
+        ? personalDataCrmConfig.tipoSolicitudOptions
+        : {};
     
     return {
       tipoSolicitanteOptions,
@@ -50,7 +62,7 @@ export const WelcomeTab = ({ task }: Props) => {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData((prev) => {
+    setFormData((prev: typeof formData) => {
       const newData = { ...prev, [field]: value };
       // Si cambia el tipo solicitante, resetear tipo solicitud
       if (field === 'tipoSolicitante') {
@@ -181,7 +193,7 @@ export const WelcomeTab = ({ task }: Props) => {
                   id="nombre-usuario"
                   type="text"
                   value={formData.nombreUsuario}
-                  onChange={(e) => handleInputChange('nombreUsuario', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('nombreUsuario', e.target.value)}
                 />
               </Box>
 
@@ -191,7 +203,7 @@ export const WelcomeTab = ({ task }: Props) => {
                   id="documento"
                   type="text"
                   value={formData.documento}
-                  onChange={(e) => handleInputChange('documento', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('documento', e.target.value)}
                 />
               </Box>
 
@@ -201,7 +213,7 @@ export const WelcomeTab = ({ task }: Props) => {
                   id="nit"
                   type="text"
                   value={formData.nit}
-                  onChange={(e) => handleInputChange('nit', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('nit', e.target.value)}
                 />
                 <HelpText>9 dígitos</HelpText>
               </Box>
@@ -211,7 +223,7 @@ export const WelcomeTab = ({ task }: Props) => {
                 <Select
                   id="clasificacion-empresa"
                   value={formData.clasificacionEmpresa}
-                  onChange={(e) => handleInputChange('clasificacionEmpresa', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleInputChange('clasificacionEmpresa', e.target.value)}
                 >
                   <Option value="Pequeña">Pequeña</Option>
                   <Option value="Mediana">Mediana</Option>
@@ -234,12 +246,12 @@ export const WelcomeTab = ({ task }: Props) => {
                 <Select
                   id="tipo-solicitante"
                   value={formData.tipoSolicitante}
-                  onChange={(e) => handleInputChange('tipoSolicitante', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleInputChange('tipoSolicitante', e.target.value)}
                 >
                   <Option value="" disabled>
                     Selecciona una opción
                   </Option>
-                  {config.tipoSolicitanteOptions.map((option) => (
+                  {config.tipoSolicitanteOptions.map((option: string) => (
                     <Option key={option} value={option}>
                       {option}
                     </Option>
@@ -252,7 +264,7 @@ export const WelcomeTab = ({ task }: Props) => {
                 <Select
                   id="tipo-solicitud"
                   value={formData.tipoSolicitud}
-                  onChange={(e) => handleInputChange('tipoSolicitud', e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleInputChange('tipoSolicitud', e.target.value)}
                   disabled={!formData.tipoSolicitante}
                 >
                   <Option value="" disabled>
@@ -260,7 +272,7 @@ export const WelcomeTab = ({ task }: Props) => {
                       ? 'Selecciona una opción'
                       : 'Primero selecciona el tipo de solicitante'}
                   </Option>
-                  {tipoSolicitudOptions.map((option) => (
+                  {tipoSolicitudOptions.map((option: string) => (
                     <Option key={option} value={option}>
                       {option}
                     </Option>
