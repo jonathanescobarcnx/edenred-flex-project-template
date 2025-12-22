@@ -425,22 +425,8 @@
       },
       "personal_data_crm": {
         "enabled": true,
-        "tipoSolicitanteOptions": [
-          "Empresa",
-          "Persona"
-        ],
-        "tipoSolicitudOptions": {
-          "Empresa": [
-            "Solicitud Empresa 1",
-            "Solicitud Empresa 2",
-            "Solicitud Empresa 3"
-          ],
-          "Persona": [
-            "Solicitud Persona 1",
-            "Solicitud Persona 2",
-            "Solicitud Persona 3"
-          ]
-        }
+        "tipoSolicitanteOptions": [],
+        "tipoSolicitudOptions": {}
       }
     }
   }
