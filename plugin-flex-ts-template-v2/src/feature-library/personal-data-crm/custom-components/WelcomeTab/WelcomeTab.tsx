@@ -17,6 +17,7 @@ export interface Props {
 }
 
 interface PersonalDataCrmConfig {
+  clasificacionEmpresaOptions: string[];
   tipoSolicitanteOptions: string[];
   tipoSolicitudOptions: Record<string, string[]>;
 }
@@ -37,6 +38,9 @@ export const WelcomeTab = ({ task }: Props) => {
     const personalDataCrmConfig = featureFlags?.features?.personal_data_crm || {};
     
     // Obtener las opciones desde la configuración JSON
+    const clasificacionEmpresaOptions: string[] = Array.isArray(personalDataCrmConfig.clasificacionEmpresaOptions)
+      ? personalDataCrmConfig.clasificacionEmpresaOptions
+      : [];
     const tipoSolicitanteOptions: string[] = Array.isArray(personalDataCrmConfig.tipoSolicitanteOptions)
       ? personalDataCrmConfig.tipoSolicitanteOptions
       : [];
@@ -48,6 +52,7 @@ export const WelcomeTab = ({ task }: Props) => {
         : {};
     
     return {
+      clasificacionEmpresaOptions,
       tipoSolicitanteOptions,
       tipoSolicitudOptions,
     };
@@ -225,9 +230,14 @@ export const WelcomeTab = ({ task }: Props) => {
                   value={formData.clasificacionEmpresa}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleInputChange('clasificacionEmpresa', e.target.value)}
                 >
-                  <Option value="Pequeña">Pequeña</Option>
-                  <Option value="Mediana">Mediana</Option>
-                  <Option value="Grande">Grande</Option>
+                  <Option value="" disabled>
+                    Selecciona una opción
+                  </Option>
+                  {config.clasificacionEmpresaOptions.map((option: string) => (
+                    <Option key={option} value={option}>
+                      {option}
+                    </Option>
+                  ))}
                 </Select>
               </Box>
             </Stack>
