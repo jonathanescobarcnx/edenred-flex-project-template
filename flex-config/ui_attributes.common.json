@@ -425,7 +425,6 @@
       },
       "personal_data_crm": {
         "enabled": true,
-        "clasificacionEmpresaOptions": [],
         "tipoSolicitanteOptions": [],
         "tipoSolicitudOptions": {}
       }

@@ -2,12 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { ITask } from '@twilio/flex-ui';
 import { Box } from '@twilio-paste/core/box';
 import { Heading } from '@twilio-paste/core/heading';
-import { Input } from '@twilio-paste/core/input';
 import { Label } from '@twilio-paste/core/label';
 import { Select, Option } from '@twilio-paste/core/select';
 import { Button } from '@twilio-paste/core/button';
 import { Stack } from '@twilio-paste/core/stack';
-import { HelpText } from '@twilio-paste/core/help-text';
 import { Flex } from '@twilio-paste/core/flex';
 import { Text } from '@twilio-paste/core/text';
 import { getFeatureFlags } from '../../../../utils/configuration';
@@ -17,17 +15,12 @@ export interface Props {
 }
 
 interface PersonalDataCrmConfig {
-  clasificacionEmpresaOptions: string[];
   tipoSolicitanteOptions: string[];
   tipoSolicitudOptions: Record<string, string[]>;
 }
 
 export const WelcomeTab = ({ task }: Props) => {
   const [formData, setFormData] = useState({
-    nombreUsuario: '',
-    documento: '',
-    nit: '',
-    clasificacionEmpresa: '',
     tipoSolicitante: '',
     tipoSolicitud: '',
   });
@@ -38,9 +31,6 @@ export const WelcomeTab = ({ task }: Props) => {
     const personalDataCrmConfig = featureFlags?.features?.personal_data_crm || {};
     
     // Obtener las opciones desde la configuración JSON
-    const clasificacionEmpresaOptions: string[] = Array.isArray(personalDataCrmConfig.clasificacionEmpresaOptions)
-      ? personalDataCrmConfig.clasificacionEmpresaOptions
-      : [];
     const tipoSolicitanteOptions: string[] = Array.isArray(personalDataCrmConfig.tipoSolicitanteOptions)
       ? personalDataCrmConfig.tipoSolicitanteOptions
       : [];
@@ -52,7 +42,6 @@ export const WelcomeTab = ({ task }: Props) => {
         : {};
     
     return {
-      clasificacionEmpresaOptions,
       tipoSolicitanteOptions,
       tipoSolicitudOptions,
     };
@@ -81,13 +70,6 @@ export const WelcomeTab = ({ task }: Props) => {
     // Guardar los datos del formulario en conversation_attributes
     // Guardar el tipificador: tipoSolicitante en disposition (outcome) y tipoSolicitud en outcome
     if (task) {
-      const formDataToSave = {
-        nombreUsuario: formData.nombreUsuario,
-        documento: formData.documento,
-        nit: formData.nit,
-        clasificacionEmpresa: formData.clasificacionEmpresa,
-      };
-
       // Preparar los datos de conversations
       // Asegurarse de que conversations sea un objeto, no un string
       let existingConversations: any = {};
@@ -116,11 +98,6 @@ export const WelcomeTab = ({ task }: Props) => {
           }
           return acc;
         }, {}),
-        // Datos del formulario en conversation_attributes
-        conversation_attribute_1: formDataToSave.nombreUsuario,
-        conversation_attribute_2: formDataToSave.documento,
-        conversation_attribute_3: formDataToSave.nit,
-        conversation_attribute_4: formDataToSave.clasificacionEmpresa,
       };
 
       // Guardar tipificador: tipoSolicitante en disposition (conversations.outcome)
@@ -142,7 +119,6 @@ export const WelcomeTab = ({ task }: Props) => {
       });
 
       console.log('Datos guardados:', {
-        formulario: formDataToSave,
         disposition: formData.tipoSolicitante,
         outcome: formData.tipoSolicitud,
       });
@@ -184,65 +160,6 @@ export const WelcomeTab = ({ task }: Props) => {
         overflowY="auto"
       >
         <Stack orientation="vertical" spacing="space60">
-          {/* Sección: Datos del usuario */}
-          <Box width="100%" marginBottom="space80">
-            <Box marginBottom="space40">
-              <Heading as="h3" variant="heading40" marginBottom="space0">
-                Datos del usuario
-              </Heading>
-            </Box>
-            <Stack orientation="vertical" spacing="space40">
-              <Box width="100%">
-                <Label htmlFor="nombre-usuario">NOMBRE DEL USUARIO</Label>
-                <Input
-                  id="nombre-usuario"
-                  type="text"
-                  value={formData.nombreUsuario}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('nombreUsuario', e.target.value)}
-                />
-              </Box>
-
-              <Box width="100%">
-                <Label htmlFor="documento">DOCUMENTO</Label>
-                <Input
-                  id="documento"
-                  type="text"
-                  value={formData.documento}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('documento', e.target.value)}
-                />
-              </Box>
-
-              <Box width="100%">
-                <Label htmlFor="nit">NIT</Label>
-                <Input
-                  id="nit"
-                  type="text"
-                  value={formData.nit}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('nit', e.target.value)}
-                />
-                <HelpText>9 dígitos</HelpText>
-              </Box>
-
-              <Box width="100%">
-                <Label htmlFor="clasificacion-empresa">CLASIFICACIÓN DE LA EMPRESA</Label>
-                <Select
-                  id="clasificacion-empresa"
-                  value={formData.clasificacionEmpresa}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleInputChange('clasificacionEmpresa', e.target.value)}
-                >
-                  <Option value="" disabled>
-                    Selecciona una opción
-                  </Option>
-                  {config.clasificacionEmpresaOptions.map((option: string) => (
-                    <Option key={option} value={option}>
-                      {option}
-                    </Option>
-                  ))}
-                </Select>
-              </Box>
-            </Stack>
-          </Box>
-
           {/* Sección: Tipificación */}
           <Box width="100%" marginTop="space200">
             <Box marginBottom="space40">
