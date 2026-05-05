@@ -231,6 +231,7 @@ export const WelcomeTab = ({ task }: Props) => {
                 <Box width="100%">
                   <Label htmlFor="numero-ticket">NÚMERO DE TICKET</Label>
                   <Input
+                    type="text"
                     id="numero-ticket"
                     value={formData.numeroTicket}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('numeroTicket', e.target.value)}
