@@ -103,12 +103,15 @@ export const WelcomeTab = ({ task }: Props) => {
       // Guardar tipificador: tipoSolicitante en disposition (conversations.outcome)
       if (formData.tipoSolicitante) {
         conversationsUpdate.outcome = formData.tipoSolicitante;
+        conversationsUpdate.conversation_attribute_2 = formData.tipoSolicitante;
       }
 
       // Guardar tipificador: tipoSolicitud en conversation_attribute_5
       if (formData.tipoSolicitud) {
-        conversationsUpdate.conversation_attribute_5 = formData.tipoSolicitud;
+        conversationsUpdate.conversation_attribute_3 = formData.tipoSolicitud;
       }
+
+      
 
       // Guardar en task attributes
       task.setAttributes({
