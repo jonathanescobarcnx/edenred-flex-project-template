@@ -8,6 +8,7 @@ import { Button } from '@twilio-paste/core/button';
 import { Stack } from '@twilio-paste/core/stack';
 import { Flex } from '@twilio-paste/core/flex';
 import { Text } from '@twilio-paste/core/text';
+import { Input } from '@twilio-paste/core/input';
 import { getFeatureFlags } from '../../../../utils/configuration';
 
 export interface Props {
@@ -23,6 +24,7 @@ export const WelcomeTab = ({ task }: Props) => {
   const [formData, setFormData] = useState({
     tipoSolicitante: '',
     tipoSolicitud: '',
+    numeroTicket: '',
   });
 
   // Obtener configuración desde ui_attributes
@@ -61,6 +63,10 @@ export const WelcomeTab = ({ task }: Props) => {
       // Si cambia el tipo solicitante, resetear tipo solicitud
       if (field === 'tipoSolicitante') {
         newData.tipoSolicitud = '';
+        newData.numeroTicket = '';
+      }
+      if (field === 'tipoSolicitud' && value !== 'Escalamiento PQR') {
+        newData.numeroTicket = '';
       }
       return newData;
     });
@@ -106,9 +112,20 @@ export const WelcomeTab = ({ task }: Props) => {
         conversationsUpdate.conversation_attribute_2 = formData.tipoSolicitante;
       }
 
-      // Guardar tipificador: tipoSolicitud en conversation_attribute_5
+      // Guardar tipificador: tipoSolicitud en conversation_attribute_3
       if (formData.tipoSolicitud) {
         conversationsUpdate.conversation_attribute_3 = formData.tipoSolicitud;
+      }
+
+      // Si es Escalamiento PQR, guardar el número de ticket en conversation_attribute_4
+      if (formData.tipoSolicitud === 'Escalamiento PQR') {
+        if (formData.numeroTicket) {
+          conversationsUpdate.conversation_attribute_4 = formData.numeroTicket;
+        } else {
+          delete conversationsUpdate.conversation_attribute_4;
+        }
+      } else {
+        delete conversationsUpdate.conversation_attribute_4;
       }
 
       
@@ -209,6 +226,18 @@ export const WelcomeTab = ({ task }: Props) => {
                   ))}
                 </Select>
               </Box>
+
+              {formData.tipoSolicitud === 'Escalamiento PQR' && (
+                <Box width="100%">
+                  <Label htmlFor="numero-ticket">NÚMERO DE TICKET</Label>
+                  <Input
+                    id="numero-ticket"
+                    value={formData.numeroTicket}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('numeroTicket', e.target.value)}
+                    placeholder="Ingresa el número de ticket"
+                  />
+                </Box>
+              )}
             </Stack>
           </Box>
 
