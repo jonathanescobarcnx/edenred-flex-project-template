@@ -26,6 +26,7 @@ export const WelcomeTab = ({ task }: Props) => {
     tipoSolicitud: '',
     numeroTicket: '',
   });
+  const [saveMessage, setSaveMessage] = useState('');
 
   // Obtener configuración desde ui_attributes
   const config = useMemo((): PersonalDataCrmConfig => {
@@ -58,6 +59,7 @@ export const WelcomeTab = ({ task }: Props) => {
   };
 
   const handleInputChange = (field: string, value: string) => {
+    setSaveMessage('');
     setFormData((prev: typeof formData) => {
       const newData = { ...prev, [field]: value };
       // Si cambia el tipo solicitante, resetear tipo solicitud
@@ -142,6 +144,8 @@ export const WelcomeTab = ({ task }: Props) => {
         disposition: formData.tipoSolicitante,
         outcome: formData.tipoSolicitud,
       });
+      setSaveMessage('Datos guardados exitosamente');
+      setTimeout(() => setSaveMessage(''), 3000);
     }
   };
 
@@ -247,6 +251,11 @@ export const WelcomeTab = ({ task }: Props) => {
             <Button variant="primary" onClick={handleSave}>
               Guardar
             </Button>
+            {saveMessage && (
+              <Text as="p" marginTop="space40" color="colorTextSuccess">
+                {saveMessage}
+              </Text>
+            )}
           </Box>
         </Stack>
       </Box>
