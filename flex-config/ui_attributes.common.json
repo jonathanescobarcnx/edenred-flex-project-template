@@ -423,6 +423,11 @@
         "exclude_attributes": [],
         "exclude_queues": []
       },
+      "personal_data_crm": {
+        "enabled": true,
+        "tipoSolicitanteOptions": [],
+        "tipoSolicitudOptions": {}
+      },
       "salesforce_integration": {
         "enabled": false,
         "activity_logging": true,
