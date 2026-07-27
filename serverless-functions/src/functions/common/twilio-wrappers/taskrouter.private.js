@@ -373,3 +373,28 @@ exports.getTasks = async function getTasks(parameters) {
     }));
   });
 };
+
+/**
+ * @param {object} parameters the parameters for the function
+ * @param {object} parameters.context the context from calling lambda function
+ * @param {string} parameters.workflowSid the workflow SID to fetch cumulative statistics for
+ * @param {number} parameters.minutes (optional) the lookback window in minutes (default 15)
+ * @returns {object} an object containing the workflow's cumulative statistics if successful
+ * @description fetches Workflow Cumulative Statistics (e.g. avgTaskAcceptanceTime) for the
+ * given workflow over the requested recent window
+ */
+exports.getWorkflowCumulativeStatistics = async function getWorkflowCumulativeStatistics(parameters) {
+  const { context, workflowSid, minutes } = parameters;
+
+  if (!isString(workflowSid))
+    throw new Error('Invalid parameters object passed. Parameters must contain the workflowSid string');
+  if (!isObject(context)) throw new Error('Invalid parameters object passed. Parameters must contain context object');
+
+  return twilioExecute(context, async (client) =>
+    client.taskrouter.v1
+      .workspaces(process.env.TWILIO_FLEX_WORKSPACE_SID)
+      .workflows(workflowSid)
+      .cumulativeStatistics()
+      .fetch({ minutes: minutes || 15 }),
+  );
+};
