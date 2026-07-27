@@ -317,7 +317,7 @@ exports.handler = async (context, event, callback) => {
         twiml.play(toAbsoluteAssetUrl(options.audio.confirmNumberIntro));
         Digits.trim()
           .split('')
-          .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${options.digitsAudioFolder}/${digit}.wav`)));
+          .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${digit}.wav`)));
 
         const gather = twiml.gather({
           input: 'dtmf',
