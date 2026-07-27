@@ -13,6 +13,7 @@
  */
 const { twilioExecute } = require(Runtime.getFunctions()['common/helpers/function-helper'].path);
 const TaskRouterOperations = require(Runtime.getFunctions()['common/twilio-wrappers/taskrouter'].path);
+const Configuration = require(Runtime.getFunctions()['common/twilio-wrappers/configuration'].path);
 const CallbackOperations = require(Runtime.getFunctions()['features/callback-and-voicemail/common/callback-operations']
   .path);
 
@@ -20,7 +21,6 @@ const options = {
   retainPlaceInQueue: true,
   retainRouting: true,
   sayOptions: { voice: 'Polly.Mia', language: 'es-MX' },
-  holdMusicUrl: 'http://com.twilio.music.soft-rock.s3.amazonaws.com/_ghost_-_promo_2_sample_pack.mp3',
   waitTimeStatsWindowMinutes: 15,
   // Audio file names, relative to serverless-functions/src/assets/features/callback-and-voicemail/
   // These are placeholders - replace the files at that path with the actual recordings.
@@ -45,6 +45,58 @@ const options = {
     callbackAndVoicemailUnavailable: 'La opción de devolución de llamada no está disponible en este momento. Por favor, permanece en la línea.',
   },
 };
+
+// Hold audio played (instead of generic hold music) while a caller waits, keyed by the
+// TaskRouter TaskQueue friendly name their task is queued on. Falls back to defaultHoldAudio
+// for any queue not listed here. Paths are root-relative to the configured audio base URL
+// (see getAudioBaseUrl below) - not under features/callback-and-voicemail/.
+const queueHoldAudio = {
+  Interesados: ['clientesinteresados.wav', 'icecream.mp3'],
+  Afiliados: ['Comercios.wav', 'easyseas.mp3'],
+  Clientes: ['Clientes.wav', 'icecream.mp3'],
+  Tarjetas: ['Usuarios.wav', 'fun-in-the-Sun.mp3'],
+};
+const defaultHoldAudio = ['icecream.mp3'];
+
+function getHoldAudioFiles(taskQueueFriendlyName) {
+  return queueHoldAudio[taskQueueFriendlyName] || defaultHoldAudio;
+}
+
+// How long to cache the resolved audio base URL for, across warm invocations of this function
+// container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
+const AUDIO_BASE_URL_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedAudioBaseUrl;
+let cachedAudioBaseUrlExpiresAt = 0;
+
+/**
+ * Resolves the base URL to use for building absolute <Play> URLs. Reads
+ * custom_data.features.callback_and_voicemail.custom_audio_base_url from Flex Service
+ * Configuration (editable via the Flex Admin UI's Callback and Voicemail feature card),
+ * falling back to this Serverless service's own domain if unset or unreachable.
+ * @param {*} context
+ * @returns {Promise<string>}
+ */
+async function getAudioBaseUrl(context) {
+  const now = Date.now();
+  if (cachedAudioBaseUrl && now < cachedAudioBaseUrlExpiresAt) {
+    return cachedAudioBaseUrl;
+  }
+
+  let baseUrl = `https://${context.DOMAIN_NAME}`;
+  try {
+    const result = await Configuration.fetchUiAttributes({ context });
+    const configuredBaseUrl = result.data?.custom_data?.features?.callback_and_voicemail?.custom_audio_base_url;
+    if (configuredBaseUrl) {
+      baseUrl = configuredBaseUrl.replace(/\/$/, '');
+    }
+  } catch (error) {
+    console.error(`Failed to fetch custom_audio_base_url from Flex configuration: ${error.message}`);
+  }
+
+  cachedAudioBaseUrl = baseUrl;
+  cachedAudioBaseUrlExpiresAt = now + AUDIO_BASE_URL_CACHE_TTL_MS;
+  return baseUrl;
+}
 
 /**
  * Utility function to retrieve all recent pending tasks for the supplied workflow, and find the one that matches our call SID.
@@ -139,15 +191,14 @@ exports.handler = async (context, event, callback) => {
   const twiml = new Twilio.twiml.VoiceResponse();
   const baseUrl = `https://${context.DOMAIN_NAME}/features/callback-and-voicemail/studio/wait-experience-custom`;
 
-  const toAbsoluteAssetUrl = (relativePath) => `https://${context.DOMAIN_NAME}/${relativePath}`;
+  const audioBaseUrl = await getAudioBaseUrl(context);
+  const toAbsoluteAssetUrl = (relativePath) => `${audioBaseUrl}/${relativePath}`;
 
-  let holdMusicUrl = options.holdMusicUrl;
-  // Make relative hold music URLs absolute - <Play> does not support relative URLs
-  if (!holdMusicUrl.startsWith('http://') && !holdMusicUrl.startsWith('https://')) {
-    holdMusicUrl = toAbsoluteAssetUrl(holdMusicUrl);
-  }
-
-  const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting } = event;
+  const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting, taskQueueFriendlyName } = event;
+  const mainWaitLoopUrl = (queueFriendlyName) =>
+    `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+      queueFriendlyName || '',
+    )}`;
   switch (mode) {
     case 'initialize':
     case undefined:
@@ -173,10 +224,12 @@ exports.handler = async (context, event, callback) => {
 
     case 'main-wait-loop':
       if (enqueuedTaskSid) {
+        let resolvedTaskQueueFriendlyName = taskQueueFriendlyName;
         if (skipGreeting !== 'true') {
           twiml.play(toAbsoluteAssetUrl(options.audio.queueIntro));
 
           const task = await fetchTask(context, enqueuedTaskSid);
+          resolvedTaskQueueFriendlyName = task?.taskQueueFriendlyName;
           const waitMinutes = await getEstimatedWaitMinutes(context, task?.workflowSid);
           if (waitMinutes) {
             twiml.say(options.sayOptions, `${waitMinutes}`);
@@ -187,20 +240,22 @@ exports.handler = async (context, event, callback) => {
         const initialGather = twiml.gather({
           input: 'dtmf',
           timeout: '2',
-          action: `${baseUrl}?mode=handle-main-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}`,
+          action: `${baseUrl}?mode=handle-main-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+            resolvedTaskQueueFriendlyName || '',
+          )}`,
         });
         initialGather.play(toAbsoluteAssetUrl(options.audio.queueMenu));
-        initialGather.play(holdMusicUrl);
+        getHoldAudioFiles(resolvedTaskQueueFriendlyName).forEach((file) => initialGather.play(toAbsoluteAssetUrl(file)));
+
+        // Loop back to the start, carrying the resolved TaskQueue forward so we don't need to re-fetch the task every tick
+        twiml.redirect(mainWaitLoopUrl(resolvedTaskQueueFriendlyName));
       } else {
         // If the task lookup failed to find the task previously, don't offer a callback option - since we aren't able to
         // cancel the ongoing call task
         twiml.say(options.sayOptions, options.messages.callbackAndVoicemailUnavailable);
-        twiml.play(holdMusicUrl);
+        getHoldAudioFiles().forEach((file) => twiml.play(toAbsoluteAssetUrl(file)));
+        twiml.redirect(mainWaitLoopUrl());
       }
-      // Loop back to the start if we reach this point
-      twiml.redirect(
-        `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&skipGreeting=true`,
-      );
       return callback(null, twiml);
 
     case 'handle-main-choice':
@@ -217,9 +272,7 @@ exports.handler = async (context, event, callback) => {
       }
 
       // Loop back to the start of the wait loop for any other key (or timeout)
-      twiml.redirect(
-        `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&skipGreeting=true`,
-      );
+      twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       return callback(null, twiml);
 
     case 'handle-callback-choice':
@@ -245,9 +298,7 @@ exports.handler = async (context, event, callback) => {
         return callback(null, twiml);
       } else if (Digits === '0') {
         // Back to the previous menu
-        twiml.redirect(
-          `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&skipGreeting=true`,
-        );
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
         return callback(null, twiml);
       }
 
@@ -332,9 +383,7 @@ exports.handler = async (context, event, callback) => {
     default:
       //  Default case - if we don't recognize the mode, redirect to the main wait loop
       twiml.say(options.sayOptions, options.messages.processingError);
-      twiml.redirect(
-        `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&skipGreeting=true`,
-      );
+      twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       return callback(null, twiml);
   }
 };
