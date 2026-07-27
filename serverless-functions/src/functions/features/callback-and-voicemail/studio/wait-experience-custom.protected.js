@@ -25,19 +25,16 @@ const options = {
   // Audio file names, relative to serverless-functions/src/assets/features/callback-and-voicemail/
   // These are placeholders - replace the files at that path with the actual recordings.
   audio: {
-    queueIntro: 'features/callback-and-voicemail/queue-busy-wait-time-intro.wav',
-    queueMenu: 'features/callback-and-voicemail/queue-callback-offer-menu.wav',
-    callbackNumberChoice: 'features/callback-and-voicemail/callback-number-choice-menu.wav',
+    queueIntro: 'queue-busy-wait-time-intro.wav',
+    queueMenu: 'queue-callback-offer-menu.wav',
+    callbackNumberChoice: 'callback-number-choice-menu.wav',
     // Played on callback submission regardless of whether the caller kept their own number
     // or entered a different one - there is a single confirmation prompt for both paths.
-    callbackSubmitted: 'features/callback-and-voicemail/callback-confirmed.wav',
-    enterOtherNumber: 'features/callback-and-voicemail/callback-enter-other-number.wav',
-    confirmNumberIntro: 'features/callback-and-voicemail/callback-number-confirm-intro.wav',
-    confirmNumberMenu: 'features/callback-and-voicemail/callback-number-confirm-menu.wav',
+    callbackSubmitted: 'callback-confirmed.wav',
+    enterOtherNumber: 'callback-enter-other-number.wav',
+    confirmNumberIntro: 'callback-number-confirm-intro.wav',
+    confirmNumberMenu: 'callback-number-confirm-menu.wav',
   },
-  // Folder containing one recording per digit (0.wav - 9.wav), used to read back an entered
-  // phone number digit-by-digit instead of using <Say sayAs interpret-as="telephone">.
-  digitsAudioFolder: 'features/callback-and-voicemail/digits',
   // Spanish TTS fallback strings, used only where no recorded prompt applies.
   messages: {
     processingError: 'Lo sentimos, no pudimos procesar tu solicitud. Por favor, permanece en la línea.',
