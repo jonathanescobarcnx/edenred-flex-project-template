@@ -35,6 +35,9 @@ const options = {
     confirmNumberIntro: 'features/callback-and-voicemail/callback-number-confirm-intro.wav',
     confirmNumberMenu: 'features/callback-and-voicemail/callback-number-confirm-menu.wav',
   },
+  // Folder containing one recording per digit (0.wav - 9.wav), used to read back an entered
+  // phone number digit-by-digit instead of using <Say sayAs interpret-as="telephone">.
+  digitsAudioFolder: 'features/callback-and-voicemail/digits',
   // Spanish TTS fallback strings, used only where no recorded prompt applies.
   messages: {
     processingError: 'Lo sentimos, no pudimos procesar tu solicitud. Por favor, permanece en la línea.',
@@ -176,7 +179,7 @@ exports.handler = async (context, event, callback) => {
           const task = await fetchTask(context, enqueuedTaskSid);
           const waitMinutes = await getEstimatedWaitMinutes(context, task?.workflowSid);
           if (waitMinutes) {
-            twiml.say(options.sayOptions, `Aproximadamente ${waitMinutes} minutos.`);
+            twiml.say(options.sayOptions, `${waitMinutes}`);
           }
         }
 
@@ -261,13 +264,9 @@ exports.handler = async (context, event, callback) => {
     case 'handle-other-number-confirmation-option':
       if (Digits) {
         twiml.play(toAbsoluteAssetUrl(options.audio.confirmNumberIntro));
-        const say = twiml.say(options.sayOptions);
-        say.sayAs(
-          {
-            'interpret-as': 'telephone',
-          },
-          Digits.trim(),
-        );
+        Digits.trim()
+          .split('')
+          .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${options.digitsAudioFolder}/${digit}.wav`)));
 
         const gather = twiml.gather({
           input: 'dtmf',
