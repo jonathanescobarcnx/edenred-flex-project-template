@@ -264,15 +264,18 @@ exports.handler = async (context, event, callback) => {
     case 'handle-main-choice':
       if (Digits === '1') {
         // Prompt the caller if they wish to use the number they called from, or another number.
+        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
         const callbackOptionsGather = twiml.gather({
           input: 'dtmf',
           timeout: '5',
           numDigits: 1,
-          action: `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
-            taskQueueFriendlyName || '',
-          )}`,
+          action: handleCallbackChoiceUrl,
         });
         callbackOptionsGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(handleCallbackChoiceUrl);
         return callback(null, twiml);
       }
 
@@ -292,17 +295,20 @@ exports.handler = async (context, event, callback) => {
       } else if (Digits === '2') {
         // Get desired phone number from caller - start of the number entry/confirmation retry budget
         console.log('[wait-experience-custom] handle-callback-choice: starting number entry loop with numberEntryAttempt=1');
+        const enterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
           numDigits: 13,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
-            taskQueueFriendlyName || '',
-          )}`,
+          action: enterNumberUrl,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(enterNumberUrl);
         return callback(null, twiml);
       } else if (Digits === '0') {
         // Back to the previous menu
@@ -311,13 +317,16 @@ exports.handler = async (context, event, callback) => {
       }
 
       // Any other key - replay this menu
+      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}`;
       const retryGather = twiml.gather({
         input: 'dtmf',
         timeout: '5',
         numDigits: 1,
-        action: `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}`,
+        action: retryCallbackChoiceUrl,
       });
       retryGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
+      // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+      twiml.redirect(retryCallbackChoiceUrl);
       return callback(null, twiml);
 
     case 'handle-other-number-confirmation-option': {
@@ -332,17 +341,20 @@ exports.handler = async (context, event, callback) => {
           .split('')
           .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${digit}.wav`)));
 
+        const confirmUrl = `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 15,
           numDigits: 1,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
-            taskQueueFriendlyName || '',
-          )}`,
+          action: confirmUrl,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.confirmNumberMenu));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(confirmUrl);
       } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
         // Retry budget exhausted - give up silently and return to the main wait loop.
         console.log(
@@ -354,17 +366,20 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation-option: no digits, retrying with numberEntryAttempt=${attempt + 1}`,
         );
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+          attempt + 1
+        }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
           numDigits: 13,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
-            attempt + 1
-          }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`,
+          action: retryEnterNumberUrl,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(retryEnterNumberUrl);
       }
       return callback(null, twiml);
     }
@@ -389,17 +404,20 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation: rejected/re-enter, retrying with numberEntryAttempt=${attempt + 1}`,
         );
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+          attempt + 1
+        }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
           numDigits: 13,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&numberEntryAttempt=${
-            attempt + 1
-          }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`,
+          action: retryEnterNumberUrl,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(retryEnterNumberUrl);
       }
       return callback(null, twiml);
     }
