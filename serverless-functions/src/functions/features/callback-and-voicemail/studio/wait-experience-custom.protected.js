@@ -38,7 +38,6 @@ const options = {
   // Spanish TTS fallback strings, used only where no recorded prompt applies.
   messages: {
     processingError: 'Lo sentimos, no pudimos procesar tu solicitud. Por favor, permanece en la línea.',
-    invalidInput: 'Ingresaste una opción no válida. Por favor, intenta de nuevo.',
     callbackAndVoicemailUnavailable: 'La opción de devolución de llamada no está disponible en este momento. Por favor, permanece en la línea.',
   },
 };
@@ -58,6 +57,10 @@ const defaultHoldAudio = ['icecream.mp3'];
 function getHoldAudioFiles(taskQueueFriendlyName) {
   return queueHoldAudio[taskQueueFriendlyName] || defaultHoldAudio;
 }
+
+// Max number of attempts allowed in the "enter/confirm a different callback number" loop
+// (items 15/16) before silently giving up and returning the caller to the main wait loop.
+const MAX_NUMBER_ENTRY_ATTEMPTS = 3;
 
 // How long to cache the resolved audio base URL for, across warm invocations of this function
 // container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
@@ -262,7 +265,9 @@ exports.handler = async (context, event, callback) => {
           input: 'dtmf',
           timeout: '5',
           numDigits: 1,
-          action: `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}`,
+          action: `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+            taskQueueFriendlyName || '',
+          )}`,
         });
         callbackOptionsGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
         return callback(null, twiml);
@@ -282,13 +287,15 @@ exports.handler = async (context, event, callback) => {
         );
         return callback(null, twiml);
       } else if (Digits === '2') {
-        // Get desired phone number from caller
+        // Get desired phone number from caller - start of the number entry/confirmation retry budget
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
           numDigits: 13,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}`,
+          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+            taskQueueFriendlyName || '',
+          )}`,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
@@ -309,7 +316,8 @@ exports.handler = async (context, event, callback) => {
       retryGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
       return callback(null, twiml);
 
-    case 'handle-other-number-confirmation-option':
+    case 'handle-other-number-confirmation-option': {
+      const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
       if (Digits) {
         twiml.play(toAbsoluteAssetUrl(options.audio.confirmNumberIntro));
         Digits.trim()
@@ -321,32 +329,56 @@ exports.handler = async (context, event, callback) => {
           timeout: 15,
           numDigits: 1,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}`,
+          action: `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
+            taskQueueFriendlyName || '',
+          )}`,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.confirmNumberMenu));
+      } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        // Retry budget exhausted - give up silently and return to the main wait loop.
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
-        twiml.say(options.sayOptions, options.messages.invalidInput);
+        // No digits captured (invalid entry / timeout) - retry entering the number.
+        const gather = twiml.gather({
+          input: 'dtmf',
+          timeout: 10,
+          numDigits: 13,
+          finishOnKey: '#',
+          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+            attempt + 1
+          }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`,
+          method: 'GET',
+        });
+        gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
       }
       return callback(null, twiml);
+    }
 
-    case 'handle-other-number-confirmation':
+    case 'handle-other-number-confirmation': {
+      const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
       if (Digits && Digits === '1') {
         twiml.redirect(
           `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${event.updatedPhoneNumber}`,
         );
+      } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        // Retry budget exhausted - give up silently and return to the main wait loop.
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
           numDigits: 13,
           finishOnKey: '#',
-          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}`,
+          action: `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&numberEntryAttempt=${
+            attempt + 1
+          }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`,
           method: 'GET',
         });
         gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
       }
       return callback(null, twiml);
+    }
 
     case 'submit-callback':
       // Cancel the original task and create the Callback task
