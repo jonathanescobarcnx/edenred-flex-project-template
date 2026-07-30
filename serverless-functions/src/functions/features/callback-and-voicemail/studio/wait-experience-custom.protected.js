@@ -195,6 +195,9 @@ exports.handler = async (context, event, callback) => {
   const toAbsoluteAssetUrl = (relativePath) => `${audioBaseUrl}/${relativePath}`;
 
   const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting, taskQueueFriendlyName } = event;
+  console.log(
+    `[wait-experience-custom] mode=${mode} CallSid=${CallSid} Digits=${Digits} enqueuedTaskSid=${enqueuedTaskSid} numberEntryAttempt=${event.numberEntryAttempt} taskQueueFriendlyName=${taskQueueFriendlyName}`,
+  );
   const mainWaitLoopUrl = (queueFriendlyName) =>
     `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
       queueFriendlyName || '',
@@ -288,6 +291,7 @@ exports.handler = async (context, event, callback) => {
         return callback(null, twiml);
       } else if (Digits === '2') {
         // Get desired phone number from caller - start of the number entry/confirmation retry budget
+        console.log('[wait-experience-custom] handle-callback-choice: starting number entry loop with numberEntryAttempt=1');
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
@@ -318,7 +322,11 @@ exports.handler = async (context, event, callback) => {
 
     case 'handle-other-number-confirmation-option': {
       const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-other-number-confirmation-option: raw numberEntryAttempt=${event.numberEntryAttempt} parsedAttempt=${attempt} Digits=${Digits}`,
+      );
       if (Digits) {
+        console.log(`[wait-experience-custom] handle-other-number-confirmation-option: digits captured, moving to confirmation (attempt=${attempt})`);
         twiml.play(toAbsoluteAssetUrl(options.audio.confirmNumberIntro));
         Digits.trim()
           .split('')
@@ -337,9 +345,15 @@ exports.handler = async (context, event, callback) => {
         gather.play(toAbsoluteAssetUrl(options.audio.confirmNumberMenu));
       } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
         // Retry budget exhausted - give up silently and return to the main wait loop.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation-option: no digits and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
         twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
         // No digits captured (invalid entry / timeout) - retry entering the number.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation-option: no digits, retrying with numberEntryAttempt=${attempt + 1}`,
+        );
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
@@ -357,14 +371,24 @@ exports.handler = async (context, event, callback) => {
 
     case 'handle-other-number-confirmation': {
       const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-other-number-confirmation: raw numberEntryAttempt=${event.numberEntryAttempt} parsedAttempt=${attempt} Digits=${Digits}`,
+      );
       if (Digits && Digits === '1') {
+        console.log('[wait-experience-custom] handle-other-number-confirmation: confirmed, submitting callback');
         twiml.redirect(
           `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${event.updatedPhoneNumber}`,
         );
       } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
         // Retry budget exhausted - give up silently and return to the main wait loop.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation: rejected/timeout and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
         twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation: rejected/re-enter, retrying with numberEntryAttempt=${attempt + 1}`,
+        );
         const gather = twiml.gather({
           input: 'dtmf',
           timeout: 10,
