@@ -47,12 +47,12 @@ const options = {
 // for any queue not listed here. Paths are root-relative to the configured audio base URL
 // (see getAudioBaseUrl below) - not under features/callback-and-voicemail/.
 const queueHoldAudio = {
-  Interesados: ['clientesinteresados.wav', 'icecream.mp3'],
-  Afiliados: ['Comercios.wav', 'easyseas.mp3'],
-  Clientes: ['Clientes.wav', 'icecream.mp3'],
-  Tarjetas: ['Usuarios.wav', 'fun-in-the-Sun.mp3'],
+  Interesados: ['clientesinteresados.wav', 'icecream.wav'],
+  Afiliados: ['Comercios.wav', 'easyseas.wav'],
+  Clientes: ['Clientes.wav', 'icecream.wav'],
+  Tarjetas: ['Usuarios.wav', 'fun-in-the-Sun.wav'],
 };
-const defaultHoldAudio = ['icecream.mp3'];
+const defaultHoldAudio = ['icecream.wav'];
 
 function getHoldAudioFiles(taskQueueFriendlyName) {
   return queueHoldAudio[taskQueueFriendlyName] || defaultHoldAudio;
