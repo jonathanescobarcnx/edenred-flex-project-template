@@ -267,7 +267,7 @@ exports.handler = async (context, event, callback) => {
     case 'handle-main-choice':
       if (Digits === '1') {
         // Prompt the caller if they wish to use the number they called from, or another number.
-        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
           taskQueueFriendlyName || '',
         )}`;
         const callbackOptionsGather = twiml.gather({
@@ -286,7 +286,11 @@ exports.handler = async (context, event, callback) => {
       twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       return callback(null, twiml);
 
-    case 'handle-callback-choice':
+    case 'handle-callback-choice': {
+      const callbackChoiceAttempt = parseInt(event.callbackChoiceAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-callback-choice: raw callbackChoiceAttempt=${event.callbackChoiceAttempt} parsedAttempt=${callbackChoiceAttempt} Digits=${Digits}`,
+      );
       if (Digits === '1') {
         // Caller selected option to use the number they called from
         twiml.redirect(
@@ -319,8 +323,22 @@ exports.handler = async (context, event, callback) => {
         return callback(null, twiml);
       }
 
-      // Any other key - replay this menu
-      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}`;
+      // Any other key (or timeout) - retry budget exhausted?
+      if (callbackChoiceAttempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        console.log(
+          `[wait-experience-custom] handle-callback-choice: invalid input and attempt=${callbackChoiceAttempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+        return callback(null, twiml);
+      }
+
+      // Replay this menu, incrementing the attempt count
+      console.log(
+        `[wait-experience-custom] handle-callback-choice: invalid input, retrying with callbackChoiceAttempt=${callbackChoiceAttempt + 1}`,
+      );
+      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=${
+        callbackChoiceAttempt + 1
+      }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
       const retryGather = twiml.gather({
         input: 'dtmf',
         timeout: '5',
@@ -331,6 +349,7 @@ exports.handler = async (context, event, callback) => {
       // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
       twiml.redirect(retryCallbackChoiceUrl);
       return callback(null, twiml);
+    }
 
     case 'handle-other-number-confirmation-option': {
       const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
