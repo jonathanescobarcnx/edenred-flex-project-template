@@ -34,6 +34,8 @@ const options = {
     enterOtherNumber: 'callback-enter-other-number.wav',
     confirmNumberIntro: 'callback-number-confirm-intro.wav',
     confirmNumberMenu: 'callback-number-confirm-menu.wav',
+    maxRetryAttempts: "Intentosmax.wav"
+
   },
   // Spanish TTS fallback strings, used only where no recorded prompt applies.
   messages: {
@@ -61,6 +63,7 @@ function getHoldAudioFiles(taskQueueFriendlyName) {
 // Max number of attempts allowed in the "enter/confirm a different callback number" loop
 // (items 15/16) before silently giving up and returning the caller to the main wait loop.
 const MAX_NUMBER_ENTRY_ATTEMPTS = 3;
+const DEFAULT_WAIT_TIME = 5;
 
 // How long to cache the resolved audio base URL for, across warm invocations of this function
 // container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
@@ -179,11 +182,11 @@ async function getEstimatedWaitMinutes(context, workflowSid) {
       minutes: options.waitTimeStatsWindowMinutes,
     });
     const avgTaskAcceptanceTime = result.data?.avgTaskAcceptanceTime;
-    if (!avgTaskAcceptanceTime) return undefined;
+    if (!avgTaskAcceptanceTime) return DEFAULT_WAIT_TIME;
     return Math.max(1, Math.round(avgTaskAcceptanceTime / 60));
   } catch (error) {
     console.error(`Failed to fetch workflow cumulative statistics for ${workflowSid}: ${error.message}`);
-    return undefined;
+    return DEFAULT_WAIT_TIME;
   }
 }
 
@@ -360,6 +363,7 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation-option: no digits and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
         );
+        gather.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
         twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
         // No digits captured (invalid entry / timeout) - retry entering the number.
