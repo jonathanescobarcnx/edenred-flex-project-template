@@ -382,7 +382,7 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation-option: no digits and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
         );
-        gather.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
+        twiml.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
         twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
         // No digits captured (invalid entry / timeout) - retry entering the number.
@@ -422,7 +422,7 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation: rejected/timeout and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
         );
-        gather.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
+        twiml.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
         twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
       } else {
         console.log(

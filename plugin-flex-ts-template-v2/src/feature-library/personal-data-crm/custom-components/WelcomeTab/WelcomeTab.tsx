@@ -58,8 +58,17 @@ export const WelcomeTab = ({ task }: Props) => {
     return config.tipoSolicitudOptions[tipoSolicitante] || [];
   };
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = async (field: string, value: string) => {
     setSaveMessage('');
+    if (task) {
+      await task.setAttributes({
+        ...task.attributes,
+        personal_data_crm: {
+          ...(task.attributes.personal_data_crm || {}),
+          formSubmitted: false,
+        },
+      });
+    }
     setFormData((prev: typeof formData) => {
       const newData = { ...prev, [field]: value };
       // Si cambia el tipo solicitante, resetear tipo solicitud
@@ -74,7 +83,17 @@ export const WelcomeTab = ({ task }: Props) => {
     });
   };
 
-  const handleSave = () => {
+  const isFormComplete =
+    Boolean(formData.tipoSolicitante) &&
+    Boolean(formData.tipoSolicitud) &&
+    (formData.tipoSolicitud !== 'Escalamiento PQR' || Boolean(formData.numeroTicket.trim()));
+
+  const handleSave = async () => {
+    if (!isFormComplete) {
+      setSaveMessage('Completa todos los campos antes de guardar');
+      return;
+    }
+
     // Guardar los datos del formulario en conversation_attributes
     // Guardar el tipificador: tipoSolicitante en disposition (outcome) y tipoSolicitud en outcome
     if (task) {
@@ -133,11 +152,14 @@ export const WelcomeTab = ({ task }: Props) => {
       
 
       // Guardar en task attributes
-      task.setAttributes({
+      await task.setAttributes({
         ...task.attributes,
         conversations: conversationsUpdate,
         // También guardar en personal_data_crm para referencia
-        personal_data_crm: formData,
+        personal_data_crm: {
+          ...formData,
+          formSubmitted: true,
+        },
       });
 
       console.log('Datos guardados:', {
@@ -248,7 +270,7 @@ export const WelcomeTab = ({ task }: Props) => {
 
           {/* Botón Guardar */}
           <Box width="100%" marginTop="space60">
-            <Button variant="primary" onClick={handleSave}>
+            <Button variant="primary" onClick={handleSave} disabled={!isFormComplete}>
               Guardar
             </Button>
             {saveMessage && (
