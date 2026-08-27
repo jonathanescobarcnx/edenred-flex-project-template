@@ -16,6 +16,17 @@ import { DispositionsNotification } from '../notifications';
 import TaskRouterService from '../../../../utils/serverless/TaskRouter/TaskRouterService';
 import logger from '../../../../utils/logger';
 
+const isCallbackCallAnswered = (task: Flex.ITask, manager: Flex.Manager) => {
+  const taskAttributes = task.attributes as any;
+  if (taskAttributes.taskType !== 'callback') return true;
+  if (taskAttributes.call_sid) return true;
+
+  const conference = task.conference || manager.store.getState().flex.conferences.states.get(task.taskSid)?.source;
+  return conference?.participants?.some(
+    (participant: Flex.ConferenceParticipant) => participant.participantType === 'customer',
+  );
+};
+
 const handleAbort = (flex: typeof Flex, abortFunction: any, queueSid: string, dispositionError: boolean) => {
   if (isNativeWrapupEnabled()) {
     const enabledQueues = (flex.Manager.getInstance().store.getState().flex as any).agentCopilot?.config?.enabledQueues;
@@ -46,6 +57,9 @@ export const actionName = FlexAction.CompleteTask;
 export const actionHook = function setDispositionBeforeCompleteTask(flex: typeof Flex, manager: Flex.Manager) {
   flex.Actions.addListener(`${actionEvent}${actionName}`, async (payload, abortFunction) => {
     if (!payload.task?.taskSid) {
+      return;
+    }
+    if (!isCallbackCallAnswered(payload.task, manager)) {
       return;
     }
     const queueSid = payload.task.queueSid;
