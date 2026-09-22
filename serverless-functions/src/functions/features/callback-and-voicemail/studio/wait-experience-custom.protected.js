@@ -64,6 +64,7 @@ function getHoldAudioFiles(taskQueueFriendlyName) {
 // (items 15/16) before silently giving up and returning the caller to the main wait loop.
 const MAX_NUMBER_ENTRY_ATTEMPTS = 3;
 const DEFAULT_WAIT_TIME = 5;
+const EDENRED_CALLER_ID ='+573172203333';
 
 // How long to cache the resolved audio base URL for, across warm invocations of this function
 // container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
@@ -455,7 +456,7 @@ exports.handler = async (context, event, callback) => {
       const callbackParams = {
         context,
         numberToCall: event.to,
-        numberToCallFrom: event.Called,
+        numberToCallFrom: EDENRED_CALLER_ID,
       };
 
       if (options.retainRouting && originalTask) {
