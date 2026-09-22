@@ -10,7 +10,7 @@ export const actionHook = function requirePersonalDataCrmForm(flex: typeof Flex)
     const task = payload.task || (payload.sid ? flex.TaskHelper.getTaskByTaskSid(payload.sid) : undefined);
 
     if (!task || task.attributes.personal_data_crm?.formSubmitted === true || !flex.TaskHelper.isCallTask(task)) {
-      console.log('No task, form already submitted, or not a call task. Allowing CompleteTask action to proceed.', JSON.stringify(task));
+      console.log('No task, form already submitted, or not a call task. Allowing CompleteTask action to proceed.');
       return;
     }
 
