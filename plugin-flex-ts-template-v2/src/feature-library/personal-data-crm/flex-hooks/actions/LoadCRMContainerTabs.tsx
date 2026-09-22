@@ -14,7 +14,7 @@ export const actionHook = function addWelcomeTabToCRM(flex: typeof Flex) {
 
     console.log('LoadCRMContainerTabs action payload:', payload.task);
 
-    if (flex.TaskHelper.isCallTask(payload.task) || payload.task.attributes.taskType == 'callback-outbound') {
+    if (flex.TaskHelper.isCallTask(payload.task) || payload.task.attributes.taskType !== 'callback') {
 
       // Agregar la tab de bienvenida al inicio
       payload.components = [
