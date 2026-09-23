@@ -305,10 +305,16 @@ exports.handler = async (context, event, callback) => {
         `[wait-experience-custom] handle-callback-choice: raw callbackChoiceAttempt=${event.callbackChoiceAttempt} parsedAttempt=${callbackChoiceAttempt} Digits=${Digits}`,
       );
       if (Digits === '1') {
-        // Caller selected option to use the number they called from
+        // Caller selected option to use the number they called from.
+        // event.Caller can carry a raw SIP URI (e.g. "sip:610812177@...;user=phone;...") when
+        // the call arrived over a SIP trunk, so prefer the task's already-cleaned phone number
+        // (set from the Studio flow's `flow.variables.phone` when the task was created) and
+        // only fall back to event.Caller if the task or attribute is unavailable.
+        const task = await fetchTask(context, enqueuedTaskSid);
+        const to = task?.attributes?.name || event.Caller;
         twiml.redirect(
           `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${encodeURIComponent(
-            event.Caller,
+            to,
           )}`,
         );
         return callback(null, twiml);
