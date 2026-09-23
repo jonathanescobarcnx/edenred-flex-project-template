@@ -147,10 +147,22 @@ async function fetchTask(context, taskSid) {
  * @param {*} cancelReason
  */
 async function cancelTask(context, task, cancelReason) {
+  // Studio's native call-flow tracking stores this attribute as a JSON string rather than
+  // an object, so it must be parsed before spreading (spreading a string spreads its
+  // characters into numeric-indexed keys instead of the intended fields)
+  let conversations = task.attributes.conversations;
+  if (typeof conversations === 'string') {
+    try {
+      conversations = JSON.parse(conversations);
+    } catch (error) {
+      conversations = {};
+    }
+  }
+
   const newAttributes = {
     ...task.attributes,
     conversations: {
-      ...task.attributes.conversations,
+      ...conversations,
       abandoned: 'Follow-Up',
     },
   };
