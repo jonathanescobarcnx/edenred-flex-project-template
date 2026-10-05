@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ITask } from '@twilio/flex-ui';
 import { Box } from '@twilio-paste/core/box';
 import { Heading } from '@twilio-paste/core/heading';
@@ -21,12 +21,52 @@ interface PersonalDataCrmConfig {
 }
 
 export const WelcomeTab = ({ task }: Props) => {
+  const getInitialNit = (): string => {
+    if (task?.attributes?.personal_data_crm?.nit) {
+      return task.attributes.personal_data_crm.nit;
+    }
+
+    const conversations = task?.attributes?.conversations;
+    if (typeof conversations === 'object' && conversations !== null) {
+      if (conversations.conversation_attribute_5) {
+        return String(conversations.conversation_attribute_5);
+      }
+    } else if (typeof conversations === 'string') {
+      try {
+        const parsed = JSON.parse(conversations);
+        if (parsed?.conversation_attribute_5) {
+          return String(parsed.conversation_attribute_5);
+        }
+      } catch (e) {
+        // Ignorar error al parsear JSON
+      }
+    }
+
+    return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
+  };
+
   const [formData, setFormData] = useState({
-    tipoSolicitante: '',
-    tipoSolicitud: '',
-    numeroTicket: '',
+    razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
+    nit: getInitialNit(),
+    nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
+    documento: task?.attributes?.personal_data_crm?.documento || '',
+    tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
+    tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
+    numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
   });
   const [saveMessage, setSaveMessage] = useState('');
+
+  useEffect(() => {
+    setFormData({
+      razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
+      nit: getInitialNit(),
+      nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
+      documento: task?.attributes?.personal_data_crm?.documento || '',
+      tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
+      tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
+      numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
+    });
+  }, [task?.sid]);
 
   // Obtener configuración desde ui_attributes
   const config = useMemo((): PersonalDataCrmConfig => {
@@ -84,6 +124,10 @@ export const WelcomeTab = ({ task }: Props) => {
   };
 
   const isFormComplete =
+    Boolean(formData.razonSocialCliente.trim()) &&
+    Boolean(formData.nit.trim()) &&
+    Boolean(formData.nombreQuienSeComunica.trim()) &&
+    Boolean(formData.documento.trim()) &&
     Boolean(formData.tipoSolicitante) &&
     Boolean(formData.tipoSolicitud) &&
     (formData.tipoSolicitud !== 'Escalamiento PQR' || Boolean(formData.numeroTicket.trim()));
@@ -148,7 +192,19 @@ export const WelcomeTab = ({ task }: Props) => {
         delete conversationsUpdate.conversation_attribute_4;
       }
 
-      
+      // Guardar campos obligatorios adicionales en el reporte de conversaciones
+      if (formData.nit) {
+        conversationsUpdate.conversation_attribute_5 = formData.nit;
+      }
+      if (formData.razonSocialCliente) {
+        conversationsUpdate.conversation_attribute_6 = formData.razonSocialCliente;
+      }
+      if (formData.nombreQuienSeComunica) {
+        conversationsUpdate.conversation_attribute_7 = formData.nombreQuienSeComunica;
+      }
+      if (formData.documento) {
+        conversationsUpdate.conversation_attribute_8 = formData.documento;
+      }
 
       // Guardar en task attributes
       await task.setAttributes({
@@ -164,6 +220,10 @@ export const WelcomeTab = ({ task }: Props) => {
       console.log('Datos guardados:', {
         disposition: formData.tipoSolicitante,
         outcome: formData.tipoSolicitud,
+        razonSocialCliente: formData.razonSocialCliente,
+        nit: formData.nit,
+        nombreQuienSeComunica: formData.nombreQuienSeComunica,
+        documento: formData.documento,
       });
       setSaveMessage('Datos guardados exitosamente');
       setTimeout(() => setSaveMessage(''), 3000);
@@ -214,7 +274,71 @@ export const WelcomeTab = ({ task }: Props) => {
             </Box>
             <Stack orientation="vertical" spacing="space40">
               <Box width="100%">
-                <Label htmlFor="tipo-solicitante">TIPO SOLICITANTE</Label>
+                <Label htmlFor="razon-social-cliente" required>
+                  RAZÓN SOCIAL CLIENTE
+                </Label>
+                <Input
+                  type="text"
+                  id="razon-social-cliente"
+                  value={formData.razonSocialCliente}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleInputChange('razonSocialCliente', e.target.value)
+                  }
+                  placeholder="Ingresa la razón social del cliente"
+                  required
+                />
+              </Box>
+
+              <Box width="100%">
+                <Label htmlFor="nit" required>
+                  NIT
+                </Label>
+                <Input
+                  type="text"
+                  id="nit"
+                  value={formData.nit}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleInputChange('nit', e.target.value)
+                  }
+                  placeholder="Ingresa el NIT"
+                  required
+                />
+              </Box>
+
+              <Box width="100%">
+                <Label htmlFor="nombre-quien-se-comunica" required>
+                  NOMBRE QUIEN SE COMUNICA
+                </Label>
+                <Input
+                  type="text"
+                  id="nombre-quien-se-comunica"
+                  value={formData.nombreQuienSeComunica}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleInputChange('nombreQuienSeComunica', e.target.value)
+                  }
+                  placeholder="Ingresa el nombre de quien se comunica"
+                  required
+                />
+              </Box>
+
+              <Box width="100%">
+                <Label htmlFor="documento" required>
+                  DOCUMENTO
+                </Label>
+                <Input
+                  type="text"
+                  id="documento"
+                  value={formData.documento}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleInputChange('documento', e.target.value)
+                  }
+                  placeholder="Ingresa el documento"
+                  required
+                />
+              </Box>
+
+              <Box width="100%">
+                <Label htmlFor="tipo-solicitante" required>TIPO SOLICITANTE</Label>
                 <Select
                   id="tipo-solicitante"
                   value={formData.tipoSolicitante}
@@ -232,7 +356,7 @@ export const WelcomeTab = ({ task }: Props) => {
               </Box>
 
               <Box width="100%">
-                <Label htmlFor="tipo-solicitud">TIPO SOLICITUD</Label>
+                <Label htmlFor="tipo-solicitud" required>TIPO SOLICITUD</Label>
                 <Select
                   id="tipo-solicitud"
                   value={formData.tipoSolicitud}
@@ -283,4 +407,3 @@ export const WelcomeTab = ({ task }: Props) => {
     </Flex>
   );
 };
-
