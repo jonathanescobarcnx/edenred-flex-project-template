@@ -98,36 +98,44 @@ export const WelcomeTab = ({ task }: Props) => {
     return config.tipoSolicitudOptions[tipoSolicitante] || [];
   };
 
-  const handleInputChange = async (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string) => {
     setSaveMessage('');
-    if (task) {
-      await task.setAttributes({
-        ...task.attributes,
-        personal_data_crm: {
-          ...(task.attributes.personal_data_crm || {}),
-          formSubmitted: false,
-        },
-      });
+    let sanitizedValue = value;
+
+    if (field === 'nombreQuienSeComunica') {
+      sanitizedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]/g, '');
+    } else if (field === 'nit' || field === 'documento') {
+      sanitizedValue = value.slice(0, 15);
     }
+
     setFormData((prev: typeof formData) => {
-      const newData = { ...prev, [field]: value };
+      const newData = { ...prev, [field]: sanitizedValue };
       // Si cambia el tipo solicitante, resetear tipo solicitud
       if (field === 'tipoSolicitante') {
         newData.tipoSolicitud = '';
         newData.numeroTicket = '';
       }
-      if (field === 'tipoSolicitud' && value !== 'Escalamiento PQR') {
+      if (field === 'tipoSolicitud' && sanitizedValue !== 'Escalamiento PQR') {
         newData.numeroTicket = '';
       }
       return newData;
     });
   };
 
+  const isNitValid = formData.nit.trim().length >= 4 && formData.nit.trim().length <= 15;
+  const isDocumentoValid = formData.documento.trim().length >= 4 && formData.documento.trim().length <= 15;
+  const isNombreValid =
+    formData.nombreQuienSeComunica.trim().length > 0 &&
+    /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$/.test(formData.nombreQuienSeComunica.trim());
+
   const isFormComplete =
     Boolean(formData.razonSocialCliente.trim()) &&
     Boolean(formData.nit.trim()) &&
     Boolean(formData.nombreQuienSeComunica.trim()) &&
     Boolean(formData.documento.trim()) &&
+    isNitValid &&
+    isNombreValid &&
+    isDocumentoValid &&
     Boolean(formData.tipoSolicitante) &&
     Boolean(formData.tipoSolicitud) &&
     (formData.tipoSolicitud !== 'Escalamiento PQR' || Boolean(formData.numeroTicket.trim()));
@@ -301,6 +309,7 @@ export const WelcomeTab = ({ task }: Props) => {
                     handleInputChange('nit', e.target.value)
                   }
                   placeholder="Ingresa el NIT"
+                  maxLength={15}
                   required
                 />
               </Box>
@@ -333,6 +342,7 @@ export const WelcomeTab = ({ task }: Props) => {
                     handleInputChange('documento', e.target.value)
                   }
                   placeholder="Ingresa el documento"
+                  maxLength={15}
                   required
                 />
               </Box>
