@@ -17,7 +17,7 @@ export const componentHook = function addWorkerCanvasTabs(flex: typeof Flex, _ma
     // preserve the fragments from the WorkerCanvas
     const fragments = flex.WorkerCanvas.Content.fragments
       .concat([])
-      .toSorted((a, b) => (a.props.sortOrder || 10000) - (b.props.sortOrder || 9999));
+      .sort((a, b) => (a.props.sortOrder || 10000) - (b.props.sortOrder || 9999));
 
     // remove the fragments from the WorkerCanvas to prevent vertical rendering
     fragments.forEach((fragment) => {

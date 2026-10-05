@@ -44,21 +44,21 @@ jobs:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           report-json: "eslint_report.json"
       - name: Comment on error
-        uses: mshick/add-pr-comment@b8f338c590a895d50bcbfa6c5859251edc8952fc
+        uses: mshick/add-pr-comment@v2
         if: always() && steps.annotate.outputs.errorCount > 0
         with:
           message: |
             ${{steps.annotate.outputs.summary}}
             :rotating_light: Errors must be resolved before merging, and have been annotated in the "Files changed" tab. Run `npm run lint` if you would like to see results locally.
       - name: Comment on warning
-        uses: mshick/add-pr-comment@b8f338c590a895d50bcbfa6c5859251edc8952fc
+        uses: mshick/add-pr-comment@v2
         if: always() && steps.annotate.outputs.errorCount < 1 && steps.annotate.outputs.warningCount > 0
         with:
           message: |
             ${{steps.annotate.outputs.summary}}
             :warning: Merging is still possible with these warnings, but please fix them if possible! Annotations are available in the "Files changed" tab. Run `npm run lint` if you would like to see results locally.
       - name: Comment on no issues
-        uses: mshick/add-pr-comment@b8f338c590a895d50bcbfa6c5859251edc8952fc
+        uses: mshick/add-pr-comment@v2
         if: always() && steps.annotate.outputs.errorCount < 1 && steps.annotate.outputs.warningCount < 1
         with:
           message: |

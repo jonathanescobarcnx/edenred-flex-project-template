@@ -41,7 +41,10 @@ const ScheduleEditor = (props: OwnProps) => {
   const ScheduleManagerStrings = Manager.getInstance().strings as any;
 
   useEffect(() => {
-    setTimeZones(Intl.supportedValuesOf('timeZone').sort());
+    const supportedValuesOf = (Intl as typeof Intl & {
+      supportedValuesOf?: (key: string) => string[];
+    }).supportedValuesOf;
+    setTimeZones((supportedValuesOf ? supportedValuesOf('timeZone') : ['UTC']).sort());
   }, []);
 
   const resetView = () => {

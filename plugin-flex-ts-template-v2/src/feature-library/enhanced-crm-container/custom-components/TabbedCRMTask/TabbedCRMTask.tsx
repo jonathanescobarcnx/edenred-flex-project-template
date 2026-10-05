@@ -28,14 +28,7 @@ export const TabbedCRMTask = ({ thisTask, task }: Props) => {
 
   const tabState = useTabState({ baseId: 'enhanced-crm-tabs' });
 
-  // This allows short-lived tasks (e.g. callback tasks) to share/show
-  // the same components as their parent task so CRM work can continue after
-  // the short-lived task completes and disappears. This is done by rendering
-  // components for every task, keeping the components alive, and toggling visibility.
-  const display =
-    task?.taskSid === thisTask?.taskSid || (thisTask && task?.attributes?.parentTask === thisTask?.sid)
-      ? 'flex'
-      : ('none' as any);
+  const display = task?.taskSid === thisTask?.taskSid ? 'flex' : ('none' as any);
 
   const handleCustomComponent = (payload: LoadCRMContainerTabsPayload) => {
     // The action can be invoked multiple times at once. Ensure we handle the correct invocation.

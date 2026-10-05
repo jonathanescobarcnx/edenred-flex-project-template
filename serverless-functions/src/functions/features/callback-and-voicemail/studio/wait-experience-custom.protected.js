@@ -1,0 +1,503 @@
+/*
+ * Custom Spanish-language TwiML for the <Enqueue> waitUrl, using pre-recorded audio prompts
+ * instead of TTS <Say>. This is a parallel implementation of wait-experience.protected.js -
+ * that original file is left untouched so existing deployments keep working unmodified.
+ *
+ * Differences from the original wait-experience.protected.js:
+ *  - No "press star" gate: the callback offer is announced immediately in the main wait loop.
+ *  - Announces an estimated wait time (from Workflow Cumulative Statistics) between two audio prompts.
+ *  - Only offers a callback (digit 1); there is no voicemail or WhatsApp option in this flow.
+ *  - Caller-facing prompts are played via <Play> of recorded audio; <Say> is only used for the
+ *    few dynamic values that can't be pre-recorded (the estimated wait in minutes, and reading
+ *    back an entered phone number digit-by-digit).
+ */
+const { twilioExecute } = require(Runtime.getFunctions()['common/helpers/function-helper'].path);
+const TaskRouterOperations = require(Runtime.getFunctions()['common/twilio-wrappers/taskrouter'].path);
+const Configuration = require(Runtime.getFunctions()['common/twilio-wrappers/configuration'].path);
+const CallbackOperations = require(Runtime.getFunctions()['features/callback-and-voicemail/common/callback-operations']
+  .path);
+
+const options = {
+  retainPlaceInQueue: true,
+  retainRouting: true,
+  sayOptions: { voice: 'Polly.Mia', language: 'es-MX' },
+  waitTimeStatsWindowMinutes: 15,
+  // Audio file names, relative to serverless-functions/src/assets/features/callback-and-voicemail/
+  // These are placeholders - replace the files at that path with the actual recordings.
+  audio: {
+    queueIntro: 'queue-busy-wait-time-intro.wav',
+    queueMenu: 'queue-callback-offer-menu.wav',
+    callbackNumberChoice: 'callback-number-choice-menu.wav',
+    // Played on callback submission regardless of whether the caller kept their own number
+    // or entered a different one - there is a single confirmation prompt for both paths.
+    callbackSubmitted: 'callback-confirmed.wav',
+    enterOtherNumber: 'callback-enter-other-number.wav',
+    confirmNumberIntro: 'callback-number-confirm-intro.wav',
+    confirmNumberMenu: 'callback-number-confirm-menu.wav',
+    maxRetryAttempts: "Intentosmax.wav"
+
+  },
+  // Spanish TTS fallback strings, used only where no recorded prompt applies.
+  messages: {
+    processingError: 'Lo sentimos, no pudimos procesar tu solicitud. Por favor, permanece en la línea.',
+    callbackAndVoicemailUnavailable: 'La opción de devolución de llamada no está disponible en este momento. Por favor, permanece en la línea.',
+  },
+};
+
+// Hold audio played (instead of generic hold music) while a caller waits, keyed by the
+// TaskRouter TaskQueue friendly name their task is queued on. Falls back to defaultHoldAudio
+// for any queue not listed here. Paths are root-relative to the configured audio base URL
+// (see getAudioBaseUrl below) - not under features/callback-and-voicemail/.
+const queueHoldAudio = {
+  Interesados: ['clientesinteresados.wav', 'icecream.wav'],
+  Afiliados: ['Comercios.wav', 'easyseas.wav'],
+  Clientes: ['Clientes.wav', 'icecream.wav'],
+  Tarjetas: ['Usuarios.wav', 'fun-in-the-Sun.wav'],
+};
+const defaultHoldAudio = ['icecream.wav'];
+
+function getHoldAudioFiles(taskQueueFriendlyName) {
+  return queueHoldAudio[taskQueueFriendlyName] || defaultHoldAudio;
+}
+
+// Max number of attempts allowed in the "enter/confirm a different callback number" loop
+// (items 15/16) before silently giving up and returning the caller to the main wait loop.
+const MAX_NUMBER_ENTRY_ATTEMPTS = 3;
+const DEFAULT_WAIT_TIME = 5;
+const EDENRED_CALLER_ID ='+573172203333';
+
+// How long to cache the resolved audio base URL for, across warm invocations of this function
+// container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
+const AUDIO_BASE_URL_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedAudioBaseUrl;
+let cachedAudioBaseUrlExpiresAt = 0;
+
+/**
+ * Resolves the base URL to use for building absolute <Play> URLs. Reads
+ * custom_data.features.callback_and_voicemail.custom_audio_base_url from Flex Service
+ * Configuration (editable via the Flex Admin UI's Callback and Voicemail feature card),
+ * falling back to this Serverless service's own domain if unset or unreachable.
+ * @param {*} context
+ * @returns {Promise<string>}
+ */
+async function getAudioBaseUrl(context) {
+  const now = Date.now();
+  if (cachedAudioBaseUrl && now < cachedAudioBaseUrlExpiresAt) {
+    return cachedAudioBaseUrl;
+  }
+
+  let baseUrl = `https://${context.DOMAIN_NAME}`;
+  try {
+    const result = await Configuration.fetchUiAttributes({ context });
+    const configuredBaseUrl = result.data?.custom_data?.features?.callback_and_voicemail?.custom_audio_base_url;
+    if (configuredBaseUrl) {
+      baseUrl = configuredBaseUrl.replace(/\/$/, '');
+    }
+  } catch (error) {
+    console.error(`Failed to fetch custom_audio_base_url from Flex configuration: ${error.message}`);
+  }
+
+  cachedAudioBaseUrl = baseUrl;
+  cachedAudioBaseUrlExpiresAt = now + AUDIO_BASE_URL_CACHE_TTL_MS;
+  return baseUrl;
+}
+
+/**
+ * Utility function to retrieve all recent pending tasks for the supplied workflow, and find the one that matches our call SID.
+ * This avoids the need to use EvaluateTaskAttributes which is strictly rate limited to 3 RPS.
+ * @param {*} context
+ * @param {*} callSid
+ * @param {*} workflowSid
+ * @returns
+ */
+async function getPendingTaskByCallSid(context, callSid, workflowSid) {
+  // Limiting to a single max payload size of 50 since the task should be top of the list.
+  // Fine tuning of this value can be done based on anticipated call volume and validated through load testing.
+  const result = await TaskRouterOperations.getTasks({
+    context,
+    assignmentStatus: ['pending', 'reserved'],
+    workflowSid,
+    ordering: 'DateCreated:desc',
+    limit: 50,
+  });
+
+  return result.data?.find((task) => task.attributes.call_sid === callSid);
+}
+
+/**
+ *
+ * @param {*} context
+ * @param {*} taskSid
+ * @returns
+ */
+async function fetchTask(context, taskSid) {
+  const result = await TaskRouterOperations.fetchTask({
+    context,
+    taskSid,
+  });
+  return result.data;
+}
+
+/**
+ * Cancels the task and updates the attributes to reflect the abandoned status.
+ * We don't want callbacks to contribute to abandoned task metrics.
+ *
+ * @param {*} context
+ * @param {*} task
+ * @param {*} cancelReason
+ */
+async function cancelTask(context, task, cancelReason) {
+  // Studio's native call-flow tracking stores this attribute as a JSON string rather than
+  // an object, so it must be parsed before spreading (spreading a string spreads its
+  // characters into numeric-indexed keys instead of the intended fields)
+  let conversations = task.attributes.conversations;
+  if (typeof conversations === 'string') {
+    try {
+      conversations = JSON.parse(conversations);
+    } catch (error) {
+      conversations = {};
+    }
+  }
+
+  const newAttributes = {
+    ...task.attributes,
+    conversations: {
+      ...conversations,
+      abandoned: 'Follow-Up',
+    },
+  };
+
+  return TaskRouterOperations.updateTask({
+    context,
+    taskSid: task.sid,
+    updateParams: {
+      assignmentStatus: 'canceled',
+      reason: cancelReason,
+      attributes: JSON.stringify(newAttributes),
+    },
+  });
+}
+
+/**
+ * Fetches the estimated wait time, in whole minutes, for the given workflow using
+ * Workflow Cumulative Statistics. Returns undefined if the estimate can't be determined,
+ * so callers can gracefully skip announcing a wait time.
+ * @param {*} context
+ * @param {*} workflowSid
+ * @returns {Promise<number|undefined>}
+ */
+async function getEstimatedWaitMinutes(context, workflowSid) {
+  if (!workflowSid) return undefined;
+  try {
+    const result = await TaskRouterOperations.getWorkflowCumulativeStatistics({
+      context,
+      workflowSid,
+      minutes: options.waitTimeStatsWindowMinutes,
+    });
+    const avgTaskAcceptanceTime = result.data?.avgTaskAcceptanceTime;
+    if (!avgTaskAcceptanceTime) return DEFAULT_WAIT_TIME;
+    return Math.max(1, Math.round(avgTaskAcceptanceTime / 60));
+  } catch (error) {
+    console.error(`Failed to fetch workflow cumulative statistics for ${workflowSid}: ${error.message}`);
+    return DEFAULT_WAIT_TIME;
+  }
+}
+
+exports.handler = async (context, event, callback) => {
+  const twiml = new Twilio.twiml.VoiceResponse();
+  const baseUrl = `https://${context.DOMAIN_NAME}/features/callback-and-voicemail/studio/wait-experience-custom`;
+
+  const audioBaseUrl = await getAudioBaseUrl(context);
+  const toAbsoluteAssetUrl = (relativePath) => `${audioBaseUrl}/${relativePath}`;
+
+  const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting, taskQueueFriendlyName } = event;
+  console.log(
+    `[wait-experience-custom] mode=${mode} CallSid=${CallSid} Digits=${Digits} enqueuedTaskSid=${enqueuedTaskSid} numberEntryAttempt=${event.numberEntryAttempt} taskQueueFriendlyName=${taskQueueFriendlyName}`,
+  );
+  const mainWaitLoopUrl = (queueFriendlyName) =>
+    `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+      queueFriendlyName || '',
+    )}`;
+  switch (mode) {
+    case 'initialize':
+    case undefined:
+      // Initial logic to find the associated task for the call, and propagate it through to the rest of the TwiML execution
+      // If the lookup fails to find the task, the remaining TwiML logic will not offer any callback option.
+      const enqueuedWorkflowSid = (await twilioExecute(context, (client) => client.queues(QueueSid).fetch())).data
+        .friendlyName;
+      console.log(`Enqueued workflow sid: ${enqueuedWorkflowSid}`);
+      const enqueuedTask = await getPendingTaskByCallSid(context, CallSid, enqueuedWorkflowSid);
+
+      const redirectBaseUrl = `${baseUrl}?mode=main-wait-loop&CallSid=${CallSid}`;
+
+      if (enqueuedTask) {
+        twiml.redirect(redirectBaseUrl + `&enqueuedTaskSid=${enqueuedTask.sid}`);
+      } else {
+        // Log an error for our own debugging purposes, but don't fail the call
+        console.error(
+          `Failed to find the pending task with callSid: ${CallSid}. This is potentially due to higher call volume than the API query had accounted for.`,
+        );
+        twiml.redirect(redirectBaseUrl);
+      }
+      return callback(null, twiml);
+
+    case 'main-wait-loop':
+      if (enqueuedTaskSid) {
+        let resolvedTaskQueueFriendlyName = taskQueueFriendlyName;
+        if (skipGreeting !== 'true') {
+          twiml.play(toAbsoluteAssetUrl(options.audio.queueIntro));
+
+          const task = await fetchTask(context, enqueuedTaskSid);
+          resolvedTaskQueueFriendlyName = task?.taskQueueFriendlyName;
+          const waitMinutes = await getEstimatedWaitMinutes(context, task?.workflowSid);
+          if (waitMinutes) {
+            twiml.say(options.sayOptions, `${waitMinutes}`);
+          }
+        }
+
+        // Nest the <Play> within the <Gather> to allow the caller to press a key at any time during the nested verbs' execution.
+        const initialGather = twiml.gather({
+          input: 'dtmf',
+          timeout: '2',
+          action: `${baseUrl}?mode=handle-main-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&taskQueueFriendlyName=${encodeURIComponent(
+            resolvedTaskQueueFriendlyName || '',
+          )}`,
+        });
+        initialGather.play(toAbsoluteAssetUrl(options.audio.queueMenu));
+        getHoldAudioFiles(resolvedTaskQueueFriendlyName).forEach((file) => initialGather.play(toAbsoluteAssetUrl(file)));
+
+        // Loop back to the start, carrying the resolved TaskQueue forward so we don't need to re-fetch the task every tick
+        twiml.redirect(mainWaitLoopUrl(resolvedTaskQueueFriendlyName));
+      } else {
+        // If the task lookup failed to find the task previously, don't offer a callback option - since we aren't able to
+        // cancel the ongoing call task
+        twiml.say(options.sayOptions, options.messages.callbackAndVoicemailUnavailable);
+        getHoldAudioFiles().forEach((file) => twiml.play(toAbsoluteAssetUrl(file)));
+        twiml.redirect(mainWaitLoopUrl());
+      }
+      return callback(null, twiml);
+
+    case 'handle-main-choice':
+      if (Digits === '1') {
+        // Prompt the caller if they wish to use the number they called from, or another number.
+        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
+        const callbackOptionsGather = twiml.gather({
+          input: 'dtmf',
+          timeout: '5',
+          numDigits: 1,
+          action: handleCallbackChoiceUrl,
+        });
+        callbackOptionsGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(handleCallbackChoiceUrl);
+        return callback(null, twiml);
+      }
+
+      // Loop back to the start of the wait loop for any other key (or timeout)
+      twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+      return callback(null, twiml);
+
+    case 'handle-callback-choice': {
+      const callbackChoiceAttempt = parseInt(event.callbackChoiceAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-callback-choice: raw callbackChoiceAttempt=${event.callbackChoiceAttempt} parsedAttempt=${callbackChoiceAttempt} Digits=${Digits}`,
+      );
+      if (Digits === '1') {
+        // Caller selected option to use the number they called from.
+        // event.Caller can carry a raw SIP URI (e.g. "sip:610812177@...;user=phone;...") when
+        // the call arrived over a SIP trunk, so prefer the task's already-cleaned phone number
+        // (set from the Studio flow's `flow.variables.phone` when the task was created) and
+        // only fall back to event.Caller if the task or attribute is unavailable.
+        const task = await fetchTask(context, enqueuedTaskSid);
+        const to = task?.attributes?.name || event.Caller;
+        twiml.redirect(
+          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${encodeURIComponent(
+            to,
+          )}`,
+        );
+        return callback(null, twiml);
+      } else if (Digits === '2') {
+        // Get desired phone number from caller - start of the number entry/confirmation retry budget
+        console.log('[wait-experience-custom] handle-callback-choice: starting number entry loop with numberEntryAttempt=1');
+        const enterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
+        const gather = twiml.gather({
+          input: 'dtmf',
+          timeout: 10,
+          numDigits: 13,
+          finishOnKey: '#',
+          action: enterNumberUrl,
+          method: 'GET',
+        });
+        gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(enterNumberUrl);
+        return callback(null, twiml);
+      } else if (Digits === '0') {
+        // Back to the previous menu
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+        return callback(null, twiml);
+      }
+
+      // Any other key (or timeout) - retry budget exhausted?
+      if (callbackChoiceAttempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        console.log(
+          `[wait-experience-custom] handle-callback-choice: invalid input and attempt=${callbackChoiceAttempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+        return callback(null, twiml);
+      }
+
+      // Replay this menu, incrementing the attempt count
+      console.log(
+        `[wait-experience-custom] handle-callback-choice: invalid input, retrying with callbackChoiceAttempt=${callbackChoiceAttempt + 1}`,
+      );
+      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=${
+        callbackChoiceAttempt + 1
+      }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
+      const retryGather = twiml.gather({
+        input: 'dtmf',
+        timeout: '5',
+        numDigits: 1,
+        action: retryCallbackChoiceUrl,
+      });
+      retryGather.play(toAbsoluteAssetUrl(options.audio.callbackNumberChoice));
+      // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+      twiml.redirect(retryCallbackChoiceUrl);
+      return callback(null, twiml);
+    }
+
+    case 'handle-other-number-confirmation-option': {
+      const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-other-number-confirmation-option: raw numberEntryAttempt=${event.numberEntryAttempt} parsedAttempt=${attempt} Digits=${Digits}`,
+      );
+      if (Digits) {
+        console.log(`[wait-experience-custom] handle-other-number-confirmation-option: digits captured, moving to confirmation (attempt=${attempt})`);
+        twiml.play(toAbsoluteAssetUrl(options.audio.confirmNumberIntro));
+        Digits.trim()
+          .split('')
+          .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${digit}.wav`)));
+
+        const confirmUrl = `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
+          taskQueueFriendlyName || '',
+        )}`;
+        const gather = twiml.gather({
+          input: 'dtmf',
+          timeout: 15,
+          numDigits: 1,
+          finishOnKey: '#',
+          action: confirmUrl,
+          method: 'GET',
+        });
+        gather.play(toAbsoluteAssetUrl(options.audio.confirmNumberMenu));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(confirmUrl);
+      } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        // Retry budget exhausted - give up silently and return to the main wait loop.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation-option: no digits and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
+        twiml.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+      } else {
+        // No digits captured (invalid entry / timeout) - retry entering the number.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation-option: no digits, retrying with numberEntryAttempt=${attempt + 1}`,
+        );
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+          attempt + 1
+        }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
+        const gather = twiml.gather({
+          input: 'dtmf',
+          timeout: 10,
+          numDigits: 13,
+          finishOnKey: '#',
+          action: retryEnterNumberUrl,
+          method: 'GET',
+        });
+        gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(retryEnterNumberUrl);
+      }
+      return callback(null, twiml);
+    }
+
+    case 'handle-other-number-confirmation': {
+      const attempt = parseInt(event.numberEntryAttempt, 10) || 1;
+      console.log(
+        `[wait-experience-custom] handle-other-number-confirmation: raw numberEntryAttempt=${event.numberEntryAttempt} parsedAttempt=${attempt} Digits=${Digits}`,
+      );
+      if (Digits && Digits === '1') {
+        console.log('[wait-experience-custom] handle-other-number-confirmation: confirmed, submitting callback');
+        twiml.redirect(
+          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${event.updatedPhoneNumber}`,
+        );
+      } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
+        // Retry budget exhausted - give up silently and return to the main wait loop.
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation: rejected/timeout and attempt=${attempt} >= MAX=${MAX_NUMBER_ENTRY_ATTEMPTS} - falling back to main-wait-loop`,
+        );
+        twiml.play(toAbsoluteAssetUrl(options.audio.maxRetryAttempts));
+        twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+      } else {
+        console.log(
+          `[wait-experience-custom] handle-other-number-confirmation: rejected/re-enter, retrying with numberEntryAttempt=${attempt + 1}`,
+        );
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+          attempt + 1
+        }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
+        const gather = twiml.gather({
+          input: 'dtmf',
+          timeout: 10,
+          numDigits: 13,
+          finishOnKey: '#',
+          action: retryEnterNumberUrl,
+          method: 'GET',
+        });
+        gather.play(toAbsoluteAssetUrl(options.audio.enterOtherNumber));
+        // Fallback in case the Gather's timeout doesn't trigger the action fetch while on hold in queue.
+        twiml.redirect(retryEnterNumberUrl);
+      }
+      return callback(null, twiml);
+    }
+
+    case 'submit-callback':
+      // Cancel the original task and create the Callback task
+      const originalTask = await fetchTask(context, enqueuedTaskSid);
+      await cancelTask(context, originalTask, 'Opted to request a callback');
+
+      // Here you can optionally adjust callback parameters, such as a overriddenWorkflowSid
+      const callbackParams = {
+        context,
+        numberToCall: event.to,
+        numberToCallFrom: EDENRED_CALLER_ID,
+      };
+
+      if (options.retainRouting && originalTask) {
+        // Provide originalTask so that the workflow and attributes are copied to the callback
+        callbackParams.originalTask = originalTask;
+      }
+
+      if (options.retainPlaceInQueue && originalTask) {
+        // Get the original task's start time to maintain queue ordering.
+        callbackParams.virtualStartTime = originalTask.dateCreated;
+      }
+
+      await CallbackOperations.createCallbackTask(callbackParams);
+
+      // End the interaction. Hangup the call.
+      twiml.play(toAbsoluteAssetUrl(options.audio.callbackSubmitted));
+      twiml.hangup();
+      return callback(null, twiml);
+
+    default:
+      //  Default case - if we don't recognize the mode, redirect to the main wait loop
+      twiml.say(options.sayOptions, options.messages.processingError);
+      twiml.redirect(mainWaitLoopUrl(taskQueueFriendlyName));
+      return callback(null, twiml);
+  }
+};

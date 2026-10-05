@@ -33,6 +33,18 @@ exports.createCallbackTask = async (parameters) => {
   const mainTimeZone =
     originalTask?.attributes?.callBackData?.mainTimeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+  // Studio's native call-flow tracking stores this attribute as a JSON string rather than
+  // an object, so it must be parsed before spreading (spreading a string spreads its
+  // characters into numeric-indexed keys instead of the intended fields)
+  let originalConversations = originalTask?.attributes?.conversations;
+  if (typeof originalConversations === 'string') {
+    try {
+      originalConversations = JSON.parse(originalConversations);
+    } catch (error) {
+      originalConversations = {};
+    }
+  }
+
   // setup required task attributes for task
   // use provided values, fall back to original task if provided
   const attributes = {
@@ -56,8 +68,8 @@ exports.createCallbackTask = async (parameters) => {
     },
     direction: 'inbound',
     conversations: {
-      ...originalTask?.attributes?.conversations,
-      conversation_id: conversation_id || originalTask?.attributes?.conversations?.conversation_id || originalTask?.sid,
+      ...originalConversations,
+      conversation_id: conversation_id || originalConversations?.conversation_id || originalTask?.sid,
     },
   };
 
