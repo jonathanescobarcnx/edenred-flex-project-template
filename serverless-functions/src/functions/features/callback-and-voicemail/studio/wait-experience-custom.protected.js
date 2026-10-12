@@ -73,7 +73,7 @@ const LOG_TIMEOUT_MS = 3000;
  * event.Caller can carry a raw SIP URI on SIP trunks. Resolved once (when the caller accepts the
  * callback) and carried through the remaining requests as the callerPhone query parameter.
  */
-const getCallerPhone = (task, event) => task?.attributes?.name || event.Caller;
+const getCallerPhone = (task, event) => task?.attributes?.phoneNumber || event.Caller;
 
 // How long to cache the resolved IVR service base URL for, across warm invocations of this function
 // container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
