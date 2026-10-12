@@ -11,6 +11,7 @@
  *    few dynamic values that can't be pre-recorded (the estimated wait in minutes, and reading
  *    back an entered phone number digit-by-digit).
  */
+const axios = require('axios');
 const { twilioExecute } = require(Runtime.getFunctions()['common/helpers/function-helper'].path);
 const TaskRouterOperations = require(Runtime.getFunctions()['common/twilio-wrappers/taskrouter'].path);
 const Configuration = require(Runtime.getFunctions()['common/twilio-wrappers/configuration'].path);
@@ -47,7 +48,7 @@ const options = {
 // Hold audio played (instead of generic hold music) while a caller waits, keyed by the
 // TaskRouter TaskQueue friendly name their task is queued on. Falls back to defaultHoldAudio
 // for any queue not listed here. Paths are root-relative to the configured audio base URL
-// (see getAudioBaseUrl below) - not under features/callback-and-voicemail/.
+// (see getSettings below) - not under features/callback-and-voicemail/.
 const queueHoldAudio = {
   Interesados: ['clientesinteresados.wav', 'icecream.wav'],
   Afiliados: ['Comercios.wav', 'easyseas.wav'],
@@ -65,41 +66,82 @@ function getHoldAudioFiles(taskQueueFriendlyName) {
 const MAX_NUMBER_ENTRY_ATTEMPTS = 3;
 const DEFAULT_WAIT_TIME = 5;
 const EDENRED_CALLER_ID ='+573172203333';
-
-// How long to cache the resolved audio base URL for, across warm invocations of this function
-// container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
-const AUDIO_BASE_URL_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedAudioBaseUrl;
-let cachedAudioBaseUrlExpiresAt = 0;
+const LOG_TIMEOUT_MS = 3000;
 
 /**
- * Resolves the base URL to use for building absolute <Play> URLs. Reads
- * custom_data.features.callback_and_voicemail.custom_audio_base_url from Flex Service
- * Configuration (editable via the Flex Admin UI's Callback and Voicemail feature card),
- * falling back to this Serverless service's own domain if unset or unreachable.
- * @param {*} context
- * @returns {Promise<string>}
+ * Caller's phone number: prefer the task's already-cleaned number (flow.variables.phone), since
+ * event.Caller can carry a raw SIP URI on SIP trunks. Resolved once (when the caller accepts the
+ * callback) and carried through the remaining requests as the callerPhone query parameter.
  */
-async function getAudioBaseUrl(context) {
+const getCallerPhone = (task, event) => task?.attributes?.name || event.Caller;
+
+// How long to cache the resolved Flex configuration settings for, across warm invocations of this
+// function container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
+const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedSettings;
+let cachedSettingsExpiresAt = 0;
+
+/**
+ * Resolves the environment-specific settings from
+ * custom_data.features.callback_and_voicemail in Flex Service Configuration (editable via the
+ * Flex Admin UI's Callback and Voicemail feature card):
+ *  - custom_audio_base_url: base URL for <Play> URLs; falls back to this Serverless service's own domain.
+ *  - log_service_url: full URL of the external IVR logging service; if unset, logging is skipped.
+ * @param {*} context
+ * @returns {Promise<{audioBaseUrl: string, logServiceUrl: string|undefined}>}
+ */
+async function getSettings(context) {
   const now = Date.now();
-  if (cachedAudioBaseUrl && now < cachedAudioBaseUrlExpiresAt) {
-    return cachedAudioBaseUrl;
+  if (cachedSettings && now < cachedSettingsExpiresAt) {
+    return cachedSettings;
   }
 
-  let baseUrl = `https://${context.DOMAIN_NAME}`;
+  const settings = { audioBaseUrl: `https://${context.DOMAIN_NAME}`, logServiceUrl: undefined };
   try {
     const result = await Configuration.fetchUiAttributes({ context });
-    const configuredBaseUrl = result.data?.custom_data?.features?.callback_and_voicemail?.custom_audio_base_url;
-    if (configuredBaseUrl) {
-      baseUrl = configuredBaseUrl.replace(/\/$/, '');
+    const config = result.data?.custom_data?.features?.callback_and_voicemail;
+    if (config?.custom_audio_base_url) {
+      settings.audioBaseUrl = config.custom_audio_base_url.replace(/\/$/, '');
     }
+    settings.logServiceUrl = config?.log_service_url || undefined;
   } catch (error) {
-    console.error(`Failed to fetch custom_audio_base_url from Flex configuration: ${error.message}`);
+    console.error(`Failed to fetch callback_and_voicemail settings from Flex configuration: ${error.message}`);
   }
 
-  cachedAudioBaseUrl = baseUrl;
-  cachedAudioBaseUrlExpiresAt = now + AUDIO_BASE_URL_CACHE_TTL_MS;
-  return baseUrl;
+  cachedSettings = settings;
+  cachedSettingsExpiresAt = now + SETTINGS_CACHE_TTL_MS;
+  return settings;
+}
+
+/**
+ * Sends a log entry to the external IVR logging service (same payload as the Studio
+ * "send_log" run-function widgets). Never throws: a logging failure must not break the call.
+ * @param {*} fields Subset of: Phone, Input, Output, Description
+ */
+async function sendLog(context, { callSid, phone = '', input = '', output = '', description }) {
+  try {
+    const { logServiceUrl } = await getSettings(context);
+    if (!logServiceUrl) {
+      console.warn(`[wait-experience-custom] log_service_url is not configured, skipping log "${description}"`);
+      return;
+    }
+    const data = {
+      IVR: 'Callback',
+      CallSid: callSid || '',
+      Phone: phone,
+      Input: input || '',
+      Output: output || '',
+      Retries: '',
+      TransferTo: '',
+      Description: description,
+    };
+    await axios.post(logServiceUrl, new URLSearchParams({ Data: JSON.stringify(data) }).toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: LOG_TIMEOUT_MS,
+    });
+  } catch (error) {
+    console.error(`[wait-experience-custom] Failed to send log "${description}": ${error.message}`);
+  }
 }
 
 /**
@@ -207,10 +249,11 @@ exports.handler = async (context, event, callback) => {
   const twiml = new Twilio.twiml.VoiceResponse();
   const baseUrl = `https://${context.DOMAIN_NAME}/features/callback-and-voicemail/studio/wait-experience-custom`;
 
-  const audioBaseUrl = await getAudioBaseUrl(context);
+  const { audioBaseUrl } = await getSettings(context);
   const toAbsoluteAssetUrl = (relativePath) => `${audioBaseUrl}/${relativePath}`;
 
   const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting, taskQueueFriendlyName } = event;
+  let { callerPhone } = event;
   console.log(
     `[wait-experience-custom] mode=${mode} CallSid=${CallSid} Digits=${Digits} enqueuedTaskSid=${enqueuedTaskSid} numberEntryAttempt=${event.numberEntryAttempt} taskQueueFriendlyName=${taskQueueFriendlyName}`,
   );
@@ -279,8 +322,15 @@ exports.handler = async (context, event, callback) => {
 
     case 'handle-main-choice':
       if (Digits === '1') {
+        callerPhone = getCallerPhone(await fetchTask(context, enqueuedTaskSid), event);
+        await sendLog(context, {
+          callSid: CallSid,
+          phone: callerPhone,
+          input: Digits,
+          description: 'Cliente aceptó la devolución de llamada',
+        });
         // Prompt the caller if they wish to use the number they called from, or another number.
-        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+        const handleCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&callbackChoiceAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
           taskQueueFriendlyName || '',
         )}`;
         const callbackOptionsGather = twiml.gather({
@@ -310,10 +360,15 @@ exports.handler = async (context, event, callback) => {
         // the call arrived over a SIP trunk, so prefer the task's already-cleaned phone number
         // (set from the Studio flow's `flow.variables.phone` when the task was created) and
         // only fall back to event.Caller if the task or attribute is unavailable.
-        const task = await fetchTask(context, enqueuedTaskSid);
-        const to = task?.attributes?.name || event.Caller;
+        const to = callerPhone || event.Caller;
+        await sendLog(context, {
+          callSid: CallSid,
+          phone: to,
+          input: Digits,
+          description: 'Cliente seleccionó el número desde el que llama para la devolución de llamada',
+        });
         twiml.redirect(
-          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${encodeURIComponent(
+          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&to=${encodeURIComponent(
             to,
           )}`,
         );
@@ -321,7 +376,7 @@ exports.handler = async (context, event, callback) => {
       } else if (Digits === '2') {
         // Get desired phone number from caller - start of the number entry/confirmation retry budget
         console.log('[wait-experience-custom] handle-callback-choice: starting number entry loop with numberEntryAttempt=1');
-        const enterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
+        const enterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&CallSid=${CallSid}&numberEntryAttempt=1&taskQueueFriendlyName=${encodeURIComponent(
           taskQueueFriendlyName || '',
         )}`;
         const gather = twiml.gather({
@@ -355,7 +410,7 @@ exports.handler = async (context, event, callback) => {
       console.log(
         `[wait-experience-custom] handle-callback-choice: invalid input, retrying with callbackChoiceAttempt=${callbackChoiceAttempt + 1}`,
       );
-      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callbackChoiceAttempt=${
+      const retryCallbackChoiceUrl = `${baseUrl}?mode=handle-callback-choice&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&callbackChoiceAttempt=${
         callbackChoiceAttempt + 1
       }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
       const retryGather = twiml.gather({
@@ -382,7 +437,7 @@ exports.handler = async (context, event, callback) => {
           .split('')
           .forEach((digit) => twiml.play(toAbsoluteAssetUrl(`${digit}.wav`)));
 
-        const confirmUrl = `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
+        const confirmUrl = `${baseUrl}?mode=handle-other-number-confirmation&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&updatedPhoneNumber=${Digits.trim()}&numberEntryAttempt=${attempt}&taskQueueFriendlyName=${encodeURIComponent(
           taskQueueFriendlyName || '',
         )}`;
         const gather = twiml.gather({
@@ -408,7 +463,7 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation-option: no digits, retrying with numberEntryAttempt=${attempt + 1}`,
         );
-        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&CallSid=${CallSid}&numberEntryAttempt=${
           attempt + 1
         }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
         const gather = twiml.gather({
@@ -433,8 +488,14 @@ exports.handler = async (context, event, callback) => {
       );
       if (Digits && Digits === '1') {
         console.log('[wait-experience-custom] handle-other-number-confirmation: confirmed, submitting callback');
+        await sendLog(context, {
+          callSid: CallSid,
+          phone: callerPhone,
+          input: event.updatedPhoneNumber,
+          description: 'Cliente confirmó otro número para la devolución de llamada',
+        });
         twiml.redirect(
-          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&to=${event.updatedPhoneNumber}`,
+          `${baseUrl}?mode=submit-callback&CallSid=${CallSid}&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&to=${event.updatedPhoneNumber}`,
         );
       } else if (attempt >= MAX_NUMBER_ENTRY_ATTEMPTS) {
         // Retry budget exhausted - give up silently and return to the main wait loop.
@@ -447,7 +508,7 @@ exports.handler = async (context, event, callback) => {
         console.log(
           `[wait-experience-custom] handle-other-number-confirmation: rejected/re-enter, retrying with numberEntryAttempt=${attempt + 1}`,
         );
-        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&CallSid=${CallSid}&numberEntryAttempt=${
+        const retryEnterNumberUrl = `${baseUrl}?mode=handle-other-number-confirmation-option&enqueuedTaskSid=${enqueuedTaskSid}&callerPhone=${encodeURIComponent(callerPhone || '')}&CallSid=${CallSid}&numberEntryAttempt=${
           attempt + 1
         }&taskQueueFriendlyName=${encodeURIComponent(taskQueueFriendlyName || '')}`;
         const gather = twiml.gather({
@@ -488,6 +549,12 @@ exports.handler = async (context, event, callback) => {
       }
 
       await CallbackOperations.createCallbackTask(callbackParams);
+      await sendLog(context, {
+        callSid: CallSid,
+        phone: callerPhone,
+        output: event.to,
+        description: 'Devolución de llamada programada',
+      });
 
       // End the interaction. Hangup the call.
       twiml.play(toAbsoluteAssetUrl(options.audio.callbackSubmitted));

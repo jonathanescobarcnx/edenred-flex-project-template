@@ -58,7 +58,8 @@
         "allow_requeue": true,
         "max_attempts": 3,
         "auto_select_task": true,
-        "custom_audio_base_url": "<YOUR_IVR_SERVICE_DOMAIN>"
+        "custom_audio_base_url": "<YOUR_IVR_SERVICE_DOMAIN>",
+        "log_service_url": "<YOUR_IVR_LOG_SERVICE_URL>"
       },
       "caller_id": {
         "enabled": true,
