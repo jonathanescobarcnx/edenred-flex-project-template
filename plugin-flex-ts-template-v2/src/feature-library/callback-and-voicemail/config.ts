@@ -6,7 +6,7 @@ const {
   allow_requeue = false,
   max_attempts = 1,
   auto_select_task = false,
-  custom_audio_base_url = '',
+  ivr_service_base_url = '',
 } = (getFeatureFlags()?.features?.callback_and_voicemail as CallbackAndVoicemailConfig) || {};
 
 export const isFeatureEnabled = () => {
@@ -25,6 +25,6 @@ export const getMaxAttempts = () => {
   return max_attempts;
 };
 
-export const getCustomAudioBaseUrl = () => {
-  return custom_audio_base_url;
+export const getIvrServiceBaseUrl = () => {
+  return ivr_service_base_url;
 };

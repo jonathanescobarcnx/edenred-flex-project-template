@@ -47,8 +47,8 @@ const options = {
 
 // Hold audio played (instead of generic hold music) while a caller waits, keyed by the
 // TaskRouter TaskQueue friendly name their task is queued on. Falls back to defaultHoldAudio
-// for any queue not listed here. Paths are root-relative to the configured audio base URL
-// (see getSettings below) - not under features/callback-and-voicemail/.
+// for any queue not listed here. Paths are root-relative to the configured IVR service base URL
+// (see getIvrServiceBaseUrl below) - not under features/callback-and-voicemail/.
 const queueHoldAudio = {
   Interesados: ['clientesinteresados.wav', 'icecream.wav'],
   Afiliados: ['Comercios.wav', 'easyseas.wav'],
@@ -75,42 +75,41 @@ const LOG_TIMEOUT_MS = 3000;
  */
 const getCallerPhone = (task, event) => task?.attributes?.name || event.Caller;
 
-// How long to cache the resolved Flex configuration settings for, across warm invocations of this
-// function container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
-const SETTINGS_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedSettings;
-let cachedSettingsExpiresAt = 0;
+// How long to cache the resolved IVR service base URL for, across warm invocations of this function
+// container, to avoid calling the Flex Configuration API on every ~2s wait-loop tick / keypress.
+const IVR_SERVICE_BASE_URL_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedIvrServiceBaseUrl;
+let cachedIvrServiceBaseUrlExpiresAt = 0;
 
 /**
- * Resolves the environment-specific settings from
- * custom_data.features.callback_and_voicemail in Flex Service Configuration (editable via the
- * Flex Admin UI's Callback and Voicemail feature card):
- *  - custom_audio_base_url: base URL for <Play> URLs; falls back to this Serverless service's own domain.
- *  - log_service_url: full URL of the external IVR logging service; if unset, logging is skipped.
+ * Resolves the base URL to use for building absolute <Play> URLs and for reaching the IVR logging
+ * service (${baseUrl}/queue_messages). Reads
+ * custom_data.features.callback_and_voicemail.ivr_service_base_url from Flex Service
+ * Configuration (editable via the Flex Admin UI's Callback and Voicemail feature card),
+ * falling back to this Serverless service's own domain if unset or unreachable.
  * @param {*} context
- * @returns {Promise<{audioBaseUrl: string, logServiceUrl: string|undefined}>}
+ * @returns {Promise<string>}
  */
-async function getSettings(context) {
+async function getIvrServiceBaseUrl(context) {
   const now = Date.now();
-  if (cachedSettings && now < cachedSettingsExpiresAt) {
-    return cachedSettings;
+  if (cachedIvrServiceBaseUrl && now < cachedIvrServiceBaseUrlExpiresAt) {
+    return cachedIvrServiceBaseUrl;
   }
 
-  const settings = { audioBaseUrl: `https://${context.DOMAIN_NAME}`, logServiceUrl: undefined };
+  let baseUrl = `https://${context.DOMAIN_NAME}`;
   try {
     const result = await Configuration.fetchUiAttributes({ context });
-    const config = result.data?.custom_data?.features?.callback_and_voicemail;
-    if (config?.custom_audio_base_url) {
-      settings.audioBaseUrl = config.custom_audio_base_url.replace(/\/$/, '');
+    const configuredBaseUrl = result.data?.custom_data?.features?.callback_and_voicemail?.ivr_service_base_url;
+    if (configuredBaseUrl) {
+      baseUrl = configuredBaseUrl.replace(/\/$/, '');
     }
-    settings.logServiceUrl = config?.log_service_url || undefined;
   } catch (error) {
-    console.error(`Failed to fetch callback_and_voicemail settings from Flex configuration: ${error.message}`);
+    console.error(`Failed to fetch ivr_service_base_url from Flex configuration: ${error.message}`);
   }
 
-  cachedSettings = settings;
-  cachedSettingsExpiresAt = now + SETTINGS_CACHE_TTL_MS;
-  return settings;
+  cachedIvrServiceBaseUrl = baseUrl;
+  cachedIvrServiceBaseUrlExpiresAt = now + IVR_SERVICE_BASE_URL_CACHE_TTL_MS;
+  return baseUrl;
 }
 
 /**
@@ -120,11 +119,7 @@ async function getSettings(context) {
  */
 async function sendLog(context, { callSid, phone = '', input = '', output = '', description }) {
   try {
-    const { logServiceUrl } = await getSettings(context);
-    if (!logServiceUrl) {
-      console.warn(`[wait-experience-custom] log_service_url is not configured, skipping log "${description}"`);
-      return;
-    }
+    const logServiceUrl = `${await getIvrServiceBaseUrl(context)}/queue_messages`;
     const data = {
       IVR: 'Callback',
       CallSid: callSid || '',
@@ -249,8 +244,8 @@ exports.handler = async (context, event, callback) => {
   const twiml = new Twilio.twiml.VoiceResponse();
   const baseUrl = `https://${context.DOMAIN_NAME}/features/callback-and-voicemail/studio/wait-experience-custom`;
 
-  const { audioBaseUrl } = await getSettings(context);
-  const toAbsoluteAssetUrl = (relativePath) => `${audioBaseUrl}/${relativePath}`;
+  const ivrServiceBaseUrl = await getIvrServiceBaseUrl(context);
+  const toAbsoluteAssetUrl = (relativePath) => `${ivrServiceBaseUrl}/${relativePath}`;
 
   const { Digits, CallSid, QueueSid, mode, enqueuedTaskSid, skipGreeting, taskQueueFriendlyName } = event;
   let { callerPhone } = event;
