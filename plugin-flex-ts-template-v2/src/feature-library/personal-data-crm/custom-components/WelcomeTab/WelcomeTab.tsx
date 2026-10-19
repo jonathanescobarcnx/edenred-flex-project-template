@@ -105,7 +105,7 @@ export const WelcomeTab = ({ task }: Props) => {
     if (field === 'nombreQuienSeComunica') {
       sanitizedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]/g, '');
     } else if (field === 'nit' || field === 'documento') {
-      sanitizedValue = value.slice(0, 15);
+      sanitizedValue = value.replace(/\D/g, '').slice(0, 15);
     }
 
     setFormData((prev: typeof formData) => {
@@ -303,6 +303,7 @@ export const WelcomeTab = ({ task }: Props) => {
                 </Label>
                 <Input
                   type="text"
+                  inputMode="numeric"
                   id="nit"
                   value={formData.nit}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -336,6 +337,7 @@ export const WelcomeTab = ({ task }: Props) => {
                 </Label>
                 <Input
                   type="text"
+                  inputMode="numeric"
                   id="documento"
                   value={formData.documento}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
