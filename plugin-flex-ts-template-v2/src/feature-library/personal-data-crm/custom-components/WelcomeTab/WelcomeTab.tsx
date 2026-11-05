@@ -42,7 +42,8 @@ export const WelcomeTab = ({ task }: Props) => {
       }
     }
 
-    return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
+    //return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
+    return '';
   };
 
   const [formData, setFormData] = useState({
