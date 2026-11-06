@@ -105,8 +105,15 @@ export const WelcomeTab = ({ task }: Props) => {
 
     if (field === 'nombreQuienSeComunica') {
       sanitizedValue = value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]/g, '');
-    } else if (field === 'nit' || field === 'documento') {
-      sanitizedValue = value.replace(/\D/g, '').slice(0, 15);
+    } else if (field === 'nit') {
+      // Permitir números y guiones para el NIT
+      sanitizedValue = value.replace(/[^0-9-]/g, '').slice(0, 15);
+    } else if (field === 'documento') {
+      sanitizedValue = value.replace(/\D/g, '').slice(0, 15); // Documento sigue siendo solo numérico
+    } else if (field === 'numeroTicket') {
+      // Permitir solo números para el número de ticket
+      // Limitar a 10 dígitos como máximo en la entrada
+      sanitizedValue = value.replace(/\D/g, '').slice(0, 10);
     }
 
     setFormData((prev: typeof formData) => {
@@ -129,6 +136,11 @@ export const WelcomeTab = ({ task }: Props) => {
     formData.nombreQuienSeComunica.trim().length > 0 &&
     /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$/.test(formData.nombreQuienSeComunica.trim());
 
+  // Validación para numeroTicket: solo si tipoSolicitud es 'Escalamiento PQR', debe tener entre 6 y 10 dígitos.
+  const isNumeroTicketValid =
+    formData.tipoSolicitud !== 'Escalamiento PQR' ||
+    (formData.numeroTicket.trim().length >= 6 && formData.numeroTicket.trim().length <= 10);
+
   const isFormComplete =
     Boolean(formData.razonSocialCliente.trim()) &&
     Boolean(formData.nit.trim()) &&
@@ -138,8 +150,8 @@ export const WelcomeTab = ({ task }: Props) => {
     isNombreValid &&
     isDocumentoValid &&
     Boolean(formData.tipoSolicitante) &&
-    Boolean(formData.tipoSolicitud) &&
-    (formData.tipoSolicitud !== 'Escalamiento PQR' || Boolean(formData.numeroTicket.trim()));
+    Boolean(formData.tipoSolicitud) && // Asegura que tipoSolicitud esté seleccionado
+    isNumeroTicketValid; // Incluye la validación del número de ticket
 
   const handleSave = async () => {
     if (!isFormComplete) {
