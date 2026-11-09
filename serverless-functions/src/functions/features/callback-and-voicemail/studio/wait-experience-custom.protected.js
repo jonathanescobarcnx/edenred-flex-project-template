@@ -50,15 +50,34 @@ const options = {
 // for any queue not listed here. Paths are root-relative to the configured IVR service base URL
 // (see getIvrServiceBaseUrl below) - not under features/callback-and-voicemail/.
 const queueHoldAudio = {
-  Interesados: ['clientesinteresados.wav', 'icecream.wav'],
+  'Clientes Interesados': ['clientesinteresados.wav', 'icecream.wav'],
   Afiliados: ['Comercios.wav', 'easyseas.wav'],
+  Comercios: ['Comercios.wav', 'easyseas.wav'],
   Clientes: ['Clientes.wav', 'icecream.wav'],
   Tarjetas: ['Usuarios.wav', 'fun-in-the-Sun.wav'],
+  Usuarios: ['Usuarios.wav', 'fun-in-the-Sun.wav'],
+  'Solicitudes Administrativas': ['Usuarios.wav', 'fun-in-the-Sun.wav'],
+  'undefined': ['Usuarios.wav', 'fun-in-the-Sun.wav']
 };
+
+// Audio específico cuando la cola no está definida
+const undefinedHoldAudio = ['Usuarios.wav', 'fun-in-the-Sun.wav'];
+
+// Audio general para colas que no estén configuradas
 const defaultHoldAudio = ['icecream.wav'];
 
 function getHoldAudioFiles(taskQueueFriendlyName) {
-  return queueHoldAudio[taskQueueFriendlyName] || defaultHoldAudio;
+  if (
+    typeof taskQueueFriendlyName !== 'string' ||
+    !taskQueueFriendlyName.trim() ||
+    taskQueueFriendlyName.trim().toLowerCase() === 'undefined'
+  ) {
+    return undefinedHoldAudio;
+  }
+
+  const queueName = taskQueueFriendlyName.trim();
+
+  return queueHoldAudio[queueName] || defaultHoldAudio;
 }
 
 // Max number of attempts allowed in the "enter/confirm a different callback number" loop

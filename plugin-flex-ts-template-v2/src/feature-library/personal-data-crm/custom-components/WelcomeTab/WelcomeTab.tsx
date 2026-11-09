@@ -48,11 +48,36 @@ export const WelcomeTab = ({ task }: Props) => {
     return '';
   };
 
+  const getInitialDocumento = (): string => {
+    if (task?.attributes?.personal_data_crm?.documento) {
+      return task.attributes.personal_data_crm.documento;
+    }
+
+    const conversations = task?.attributes?.conversations;
+    if (typeof conversations === 'object' && conversations !== null) {
+      if (conversations.conversation_attribute_8) {
+        return String(conversations.conversation_attribute_8);
+      }
+    } else if (typeof conversations === 'string') {
+      try {
+        const parsed = JSON.parse(conversations);
+        if (parsed?.conversation_attribute_8) {
+          return String(parsed.conversation_attribute_8);
+        }
+      } catch (e) {
+        // Ignorar error al parsear JSON
+      }
+    }
+
+    return String(task?.attributes?.conversation?.conversation_attribute_8 || '');
+
+  };
+
   const [formData, setFormData] = useState({
     razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
     nit: getInitialNit(),
     nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
-    documento: task?.attributes?.personal_data_crm?.documento || '',
+    documento: getInitialDocumento(),
     tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
     tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
     numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
