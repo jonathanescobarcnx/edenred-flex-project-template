@@ -29,13 +29,15 @@ export const WelcomeTab = ({ task }: Props) => {
     const conversations = task?.attributes?.conversations;
     if (typeof conversations === 'object' && conversations !== null) {
       if (conversations.conversation_attribute_5) {
-        return String(conversations.conversation_attribute_5);
+        //return String(conversations.conversation_attribute_5);
+        return '';
       }
     } else if (typeof conversations === 'string') {
       try {
         const parsed = JSON.parse(conversations);
         if (parsed?.conversation_attribute_5) {
-          return String(parsed.conversation_attribute_5);
+          //return String(parsed.conversation_attribute_5);
+          return '';
         }
       } catch (e) {
         // Ignorar error al parsear JSON
