@@ -89,7 +89,7 @@ export const WelcomeTab = ({ task }: Props) => {
       razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
       nit: getInitialNit(),
       nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
-      documento: task?.attributes?.personal_data_crm?.documento || '',
+      documento: getInitialDocumento(),
       tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
       tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
       numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
