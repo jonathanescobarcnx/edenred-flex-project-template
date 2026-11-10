@@ -21,61 +21,41 @@ interface PersonalDataCrmConfig {
 }
 
 export const WelcomeTab = ({ task }: Props) => {
-  const getInitialNit = (): string => {
-    if (task?.attributes?.personal_data_crm?.nit) {
-      return task.attributes.personal_data_crm.nit;
-    }
-
-    const conversations = task?.attributes?.conversations;
-    if (typeof conversations === 'object' && conversations !== null) {
-      if (conversations.conversation_attribute_5) {
-        //return String(conversations.conversation_attribute_5);
-        return '';
-      }
-    } else if (typeof conversations === 'string') {
-      try {
-        const parsed = JSON.parse(conversations);
-        if (parsed?.conversation_attribute_5) {
-          //return String(parsed.conversation_attribute_5);
-          return '';
-        }
-      } catch (e) {
-        // Ignorar error al parsear JSON
-      }
-    }
-
-    //return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
-    return '';
-  };
-
   const getInitialDocumento = (): string => {
+    if (!/\bUsuario\b/i.test(String(task?.attributes?.name || ''))) {
+      return '';
+    }
+
     if (task?.attributes?.personal_data_crm?.documento) {
       return task.attributes.personal_data_crm.documento;
     }
 
     const conversations = task?.attributes?.conversations;
     if (typeof conversations === 'object' && conversations !== null) {
-      if (conversations.conversation_attribute_8) {
-        return String(conversations.conversation_attribute_8);
+      if (conversations.conversation_attribute_5) {
+        return String(conversations.conversation_attribute_5);
       }
     } else if (typeof conversations === 'string') {
       try {
         const parsed = JSON.parse(conversations);
-        if (parsed?.conversation_attribute_8) {
-          return String(parsed.conversation_attribute_8);
+        if (parsed?.conversation_attribute_5) {
+          return String(parsed.conversation_attribute_5);
         }
       } catch (e) {
         // Ignorar error al parsear JSON
       }
     }
 
-    return String(task?.attributes?.conversation?.conversation_attribute_8 || '');
+    return String(
+      task?.attributes?.conversation?.conversation_attribute_5 ||
+        '',
+    );
 
   };
 
   const [formData, setFormData] = useState({
     razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
-    nit: getInitialNit(),
+    nit: '',
     nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
     documento: getInitialDocumento(),
     tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
@@ -87,14 +67,14 @@ export const WelcomeTab = ({ task }: Props) => {
   useEffect(() => {
     setFormData({
       razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
-      nit: getInitialNit(),
+      nit: '',
       nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
       documento: getInitialDocumento(),
       tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
       tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
       numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
     });
-  }, [task?.sid]);
+  }, [task?.sid, task?.attributes?.conversations, task?.attributes?.personal_data_crm]);
 
   // Obtener configuración desde ui_attributes
   const config = useMemo((): PersonalDataCrmConfig => {
@@ -157,7 +137,10 @@ export const WelcomeTab = ({ task }: Props) => {
     });
   };
 
-  const isNitValid = formData.nit.trim().length >= 4 && formData.nit.trim().length <= 15;
+  const isNitValid =
+    formData.nit.trim().length >= 4 &&
+    formData.nit.trim().length <= 15 &&
+    formData.nit.includes('-');
   const isDocumentoValid = formData.documento.trim().length >= 4 && formData.documento.trim().length <= 15;
   const isNombreValid =
     formData.nombreQuienSeComunica.trim().length > 0 &&
@@ -343,13 +326,13 @@ export const WelcomeTab = ({ task }: Props) => {
                 </Label>
                 <Input
                   type="text"
-                  inputMode="numeric"
+                  inputMode="text"
                   id="nit"
                   value={formData.nit}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     handleInputChange('nit', e.target.value)
                   }
-                  placeholder="Ingresa el NIT"
+                  placeholder="Ingresa el NIT con guion (ej. 123456789-0)"
                   maxLength={15}
                   required
                 />
