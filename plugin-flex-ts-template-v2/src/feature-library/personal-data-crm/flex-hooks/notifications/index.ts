@@ -8,7 +8,7 @@ export const notificationHook = () => [
   {
     id: PersonalDataCrmNotification.FormRequired,
     type: Flex.NotificationType.error,
-    content: 'Debes diligenciar y guardar el formulario antes de completar la tarea.',
+    content: 'Debes diligenciar y guardar el formulario con tu usuario antes de completar o transferir la tarea.',
     timeout: 3500,
   },
 ];

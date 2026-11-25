@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { ITask } from '@twilio/flex-ui';
+import { ITask, Manager } from '@twilio/flex-ui';
 import { Box } from '@twilio-paste/core/box';
 import { Heading } from '@twilio-paste/core/heading';
 import { Label } from '@twilio-paste/core/label';
@@ -9,6 +9,15 @@ import { Stack } from '@twilio-paste/core/stack';
 import { Flex } from '@twilio-paste/core/flex';
 import { Text } from '@twilio-paste/core/text';
 import { Input } from '@twilio-paste/core/input';
+import {
+  Modal,
+  ModalHeader,
+  ModalHeading,
+  ModalBody,
+  ModalFooter,
+  ModalFooterActions,
+} from '@twilio-paste/core/modal';
+
 import { getFeatureFlags } from '../../../../utils/configuration';
 
 export interface Props {
@@ -21,13 +30,41 @@ interface PersonalDataCrmConfig {
 }
 
 export const WelcomeTab = ({ task }: Props) => {
-  const getInitialDocumento = (): string => {
-    if (!/\bUsuario\b/i.test(String(task?.attributes?.name || ''))) {
+  const isCommerceOrClient = /\b(?:COMERCIO|CLIENTE)\b/i.test(String(task?.attributes?.name || ''));
+
+  const getInitialNit = (): string => {
+    if (task?.attributes?.personal_data_crm?.nit) {
+      return task.attributes.personal_data_crm.nit;
+    }
+
+    if (!isCommerceOrClient) {
       return '';
     }
 
+    const conversations = task?.attributes?.conversations;
+    if (typeof conversations === 'object' && conversations !== null) {
+      return String(conversations.conversation_attribute_5 || '');
+    }
+
+    if (typeof conversations === 'string') {
+      try {
+        const parsed = JSON.parse(conversations);
+        return String(parsed?.conversation_attribute_5 || '');
+      } catch (e) {
+        // Ignorar error al parsear JSON
+      }
+    }
+
+    return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
+  };
+
+  const getInitialDocumento = (): string => {
     if (task?.attributes?.personal_data_crm?.documento) {
       return task.attributes.personal_data_crm.documento;
+    }
+
+    if (isCommerceOrClient || !/\bUsuario\b/i.test(String(task?.attributes?.name || ''))) {
+      return '';
     }
 
     const conversations = task?.attributes?.conversations;
@@ -46,35 +83,39 @@ export const WelcomeTab = ({ task }: Props) => {
       }
     }
 
-    return String(
-      task?.attributes?.conversation?.conversation_attribute_5 ||
-        '',
-    );
+    return String(task?.attributes?.conversation?.conversation_attribute_5 || '');
 
   };
 
   const [formData, setFormData] = useState({
     razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
-    nit: '',
+    nit: getInitialNit(),
     nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
     documento: getInitialDocumento(),
     tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
     tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
     numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
   });
-  const [saveMessage, setSaveMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isError: boolean;
+  }>({ isOpen: false, title: '', message: '', isError: false });
 
   useEffect(() => {
     setFormData({
       razonSocialCliente: task?.attributes?.personal_data_crm?.razonSocialCliente || '',
-      nit: '',
+      nit: getInitialNit(),
       nombreQuienSeComunica: task?.attributes?.personal_data_crm?.nombreQuienSeComunica || '',
       documento: getInitialDocumento(),
       tipoSolicitante: task?.attributes?.personal_data_crm?.tipoSolicitante || '',
       tipoSolicitud: task?.attributes?.personal_data_crm?.tipoSolicitud || '',
       numeroTicket: task?.attributes?.personal_data_crm?.numeroTicket || '',
     });
-  }, [task?.sid, task?.attributes?.conversations, task?.attributes?.personal_data_crm]);
+    setIsSaving(false);
+  }, [task?.sid]);
 
   // Obtener configuración desde ui_attributes
   const config = useMemo((): PersonalDataCrmConfig => {
@@ -107,7 +148,6 @@ export const WelcomeTab = ({ task }: Props) => {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setSaveMessage('');
     let sanitizedValue = value;
 
     if (field === 'nombreQuienSeComunica') {
@@ -163,14 +203,27 @@ export const WelcomeTab = ({ task }: Props) => {
     Boolean(formData.tipoSolicitud) && // Asegura que tipoSolicitud esté seleccionado
     isNumeroTicketValid; // Incluye la validación del número de ticket
 
+  const closeModal = () => {
+    setModalState((prev) => ({ ...prev, isOpen: false }));
+  };
+
   const handleSave = async () => {
-    if (!isFormComplete) {
-      setSaveMessage('Completa todos los campos antes de guardar');
+    if (isSaving) {
       return;
     }
 
-    // Guardar los datos del formulario en conversation_attributes
-    // Guardar el tipificador: tipoSolicitante en disposition (outcome) y tipoSolicitud en outcome
+    if (!isFormComplete) {
+      setModalState({
+        isOpen: true,
+        title: 'Campos incompletos',
+        message: 'Por favor completa todos los campos obligatorios y asegúrate de que tengan un formato válido antes de guardar.',
+        isError: true,
+      });
+      return;
+    }
+
+    setIsSaving(true);
+
     if (task) {
       // Preparar los datos de conversations
       // Asegurarse de que conversations sea un objeto, no un string
@@ -237,27 +290,41 @@ export const WelcomeTab = ({ task }: Props) => {
         conversationsUpdate.conversation_attribute_8 = formData.documento;
       }
 
-      // Guardar en task attributes
-      await task.setAttributes({
-        ...task.attributes,
-        conversations: conversationsUpdate,
-        // También guardar en personal_data_crm para referencia
-        personal_data_crm: {
-          ...formData,
-          formSubmitted: true,
-        },
-      });
+      try {
+        // Guardar en task attributes
+        await task.setAttributes({
+          ...task.attributes,
+          conversations: conversationsUpdate,
+          // También guardar en personal_data_crm para referencia
+          personal_data_crm: {
+            ...formData,
+            formSubmitted: true,
+            formSubmittedByWorkerSid: Manager.getInstance().workerClient?.sid,
+          },
+        });
 
-      console.log('Datos guardados:', {
-        disposition: formData.tipoSolicitante,
-        outcome: formData.tipoSolicitud,
-        razonSocialCliente: formData.razonSocialCliente,
-        nit: formData.nit,
-        nombreQuienSeComunica: formData.nombreQuienSeComunica,
-        documento: formData.documento,
-      });
-      setSaveMessage('Datos guardados exitosamente');
-      setTimeout(() => setSaveMessage(''), 3000);
+        setModalState({
+          isOpen: true,
+          title: 'Guardado exitoso',
+          message: 'La tipificación y los datos han sido guardados correctamente en la tarea.',
+          isError: false,
+        });
+      } catch (error) {
+        console.error('Error al guardar datos de la tarea:', error);
+        setModalState({
+          isOpen: true,
+          title: 'Error al guardar',
+          message: 'Ocurrió un error al intentar guardar los datos. Por favor, inténtalo nuevamente.',
+          isError: true,
+        });
+      } finally {
+        // Pausa breve para prevenir reenvíos inmediatos
+        setTimeout(() => {
+          setIsSaving(false);
+        }, 1200);
+      }
+    } else {
+      setIsSaving(false);
     }
   };
 
@@ -428,17 +495,43 @@ export const WelcomeTab = ({ task }: Props) => {
 
           {/* Botón Guardar */}
           <Box width="100%" marginTop="space60">
-            <Button variant="primary" onClick={handleSave} disabled={!isFormComplete}>
-              Guardar
+            <Button
+              variant="primary"
+              onClick={handleSave}
+              disabled={!isFormComplete || isSaving}
+              loading={isSaving}
+            >
+              {isSaving ? 'Guardando...' : 'Guardar'}
             </Button>
-            {saveMessage && (
-              <Text as="p" marginTop="space40" color="colorTextSuccess">
-                {saveMessage}
-              </Text>
-            )}
           </Box>
         </Stack>
       </Box>
+
+      {/* Modal de retroalimentación de guardado */}
+      <Modal
+        ariaLabelledby="modal-welcome-tab-title"
+        isOpen={modalState.isOpen}
+        onDismiss={closeModal}
+        size="default"
+      >
+        <ModalHeader>
+          <ModalHeading as="h3" id="modal-welcome-tab-title">
+            {modalState.title}
+          </ModalHeading>
+        </ModalHeader>
+        <ModalBody>
+          <Text as="p" color={modalState.isError ? 'colorTextError' : 'colorTextSuccess'}>
+            {modalState.message}
+          </Text>
+        </ModalBody>
+        <ModalFooter>
+          <ModalFooterActions>
+            <Button variant={modalState.isError ? 'secondary' : 'primary'} onClick={closeModal}>
+              Aceptar
+            </Button>
+          </ModalFooterActions>
+        </ModalFooter>
+      </Modal>
     </Flex>
   );
 };
