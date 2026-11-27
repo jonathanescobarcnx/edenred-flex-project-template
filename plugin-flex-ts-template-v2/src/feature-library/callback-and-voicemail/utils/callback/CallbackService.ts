@@ -46,12 +46,39 @@ class CallbackService extends ApiService {
           const { numberToCall: destination, numberToCallFrom } = callBackData;
           // Don't pass SIP caller IDs, because they cannot be used.
           const callerId = numberToCallFrom && !numberToCallFrom.startsWith('sip:') ? numberToCallFrom : undefined;
+          
+          function getCallSid(task, conversations) {
+            let attrs = {};
+
+            if (task?.attributes) {
+              if (typeof task.attributes === 'string') {
+                try {
+                  attrs = JSON.parse(task.attributes);
+                } catch (e) {
+                  attrs = {};
+                }
+              } else if (typeof task.attributes === 'object') {
+                attrs = task.attributes;
+              }
+            }
+
+            return (
+              attrs.call_sid ||
+              attrs.CallSid ||
+              attrs.callSid ||
+              attrs.conference?.participants?.customer ||
+              conversations?.call_sid ||
+              conversations?.CallSid ||
+              task?.taskSid
+            );
+          }
 
           const outboundCallTaskAttributes = {
             ...task.attributes,
             taskType: 'callback-outbound',
             conversations: {
               conversation_id: conversations?.conversation_id || task.taskSid,
+              conversation_attribute_1: conversations?.conversation_attribute_1 || getCallSid(task, conversations),
             },
             autoClose: true,
             parentTask: task.sid,
